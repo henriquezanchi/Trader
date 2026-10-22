@@ -1,55 +1,57 @@
 # Trade Lab
 
-Protótipo de agente **por regras**, exclusivamente simulado, para BTC/BRL e orçamento virtual privado. Não usa modelo de IA, corretora, depósito ou chave de negociação. Não aumenta capital automaticamente.
+Laboratório de negociação **exclusivamente simulado**, com preços indicativos BTC/BRL, ETH/BRL e SOL/BRL via CoinGecko. Não executa ordens reais, não usa alavancagem e não integra um modelo de IA.
 
-## Arquitetura
+## Carteira e perfis
 
-- Vercel: painel estático e API Node protegida por token.
-- Supabase: estado persistente privado, com RLS e escrita atômica por versão.
-- GitHub Actions: chama a API uma vez por hora, no minuto 17 UTC. Pode atrasar ou deixar de executar; não é adequado para negociação que dependa de pontualidade.
-- CoinGecko: preço indicativo BTC/BRL, com timestamp da fonte e tolerância máxima de dez minutos. HTTP 429, erros e cotações antigas impedem o ciclo.
+Após conectar com o `BOT_TOKEN`, pause o motor e abra **Perfil, ativos e limites**. Escolha um preset, ajuste os pesos e salve. Peso zero exclui um ativo sem posição aberta. Iniciar/retomar habilita a estratégia; o agendador externo precisa estar configurado para executar com a aba fechada. O painel consulta o estado, não substitui o agendador.
 
-## Publicar
+| Preset | BTC | ETH | SOL | Caixa mínimo planejado | Entrada por ativo | Perda diária | Perda total | Meta / prazo |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Conservador relativo a cripto | 6% | 4% | 0% | 90% | 5% | 0,5% | 2% | 2% / 90 dias |
+| Moderado relativo a cripto | 15% | 8% | 2% | 75% | 10% | 1% | 5% | 5% / 90 dias |
+| Arrojado / agressivo | 25% | 15% | 10% | 50% | 20% | 2% | 10% | 10% / 90 dias |
 
-1. Crie um repositório **privado** vazio no GitHub e envie estes arquivos, incluindo `.github/workflows/simulation.yml`. Não envie `.env`, credenciais ou `node_modules`.
-2. Escolha o projeto Supabase autorizado. No SQL Editor, execute **uma vez** `supabase/001_trade_lab.sql`. A transação cria apenas o schema privado `trade_lab` e as funções `trade_lab_read` e `trade_lab_commit` em `public`. Não execute a migração de novo sobre uma instalação existente.
-3. Importe o repositório na Vercel. Use preset **Other**, sem comando de build, diretório de saída **public**, Node **22.x**. As funções em `api/` são implantadas pela Vercel.
-4. Configure na Vercel as variáveis de `.env.example`: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `BOT_TOKEN` e, opcionalmente, `COINGECKO_DEMO_API_KEY`. Gere o token com `openssl rand -hex 32` e guarde em um gerenciador de senhas. Nunca coloque esses segredos no código ou no chat. Faça o deploy após configurar as variáveis.
-5. Em GitHub → Settings → Secrets and variables → Actions, crie `BOT_URL` com a URL HTTPS **de produção** da Vercel, e `BOT_TOKEN` com o mesmo token. Não é necessário dar ao GitHub acesso ao banco.
-6. Abra o painel, digite o token e execute o primeiro ciclo. Depois rode `Simulação horária BTC` em Actions → Run workflow. Confirme o primeiro registro e a execução seguinte antes de considerar o agente ativo. O workflow precisa estar na branch padrão e habilitado. Proteções de acesso da Vercel precisam permitir chamadas do agendador à API; o token do agente continua obrigatório.
+Os percentuais usam o **capital virtual inicial**, não aumentam o aporte com ganhos. A entrada efetiva respeita o menor entre saldo, teto por entrada, peso do ativo e exposição agregada disponível. Os pesos são tetos de compra, não ordens de alocação imediata nem rebalanceamento; a valorização pode elevar a exposição depois da entrada. O caixa não rende.
 
-A instalação não está concluída até esses serviços estarem conectados. Nenhum agendamento é criado apenas por abrir o painel. Não use um projeto Supabase de outra aplicação sem escolher explicitamente esse destino.
+Estes perfis ilustrativos não são suitability bancário nem recomendações pessoais. Todas as criptomoedas têm alto risco e podem cair juntas. Os textos de potencial descrevem incerteza qualitativa; não são previsões ou promessas de rentabilidade. Não há suporte a ações, fundos ou renda fixa nesta versão.
 
-## Estratégia e limites
+## Motor e controles
 
-Após 24 observações horárias consecutivas (intervalos de até 90 minutos), compara médias de 6 e 24 observações. Compra se a média curta supera a longa em mais de 0,2%; vende se fica mais de 0,2% abaixo. É uma hipótese simples para validar o sistema, não uma estratégia com rentabilidade demonstrada. Uma lacuna no agendamento reinicia a espera por uma janela contínua.
+- Médias de 6 e 24 observações **horárias consecutivas**, com margem de 0,2%, por ativo. Uma lacuna acima de 90 minutos exige nova janela contínua.
+- Até uma posição por ativo. Um ativo recém-adicionado começa seu próprio aquecimento.
+- Avaliações horárias podem manter posições entre dias; isso não garante day trade nem operações diárias.
+- Cada negócio simula taxa de 0,1% e deslizamento desfavorável de 0,1%.
+- Uma cotação ausente, inválida ou com mais de dez minutos bloqueia todo o ciclo, sem gravar saldo ou histórico parcial.
+- Perdas diária e total são avaliadas sobre o patrimônio agregado. A referência diária é a última avaliação antes do primeiro ciclo do novo dia em America/Sao_Paulo; o valor do limite usa o capital inicial.
+- Ao atingir perda, meta ou prazo, o motor liquida as posições virtuais e pausa. O prazo conta do primeiro início da carteira, incluindo pausas. Alterar parâmetros não reinicia essa data nem repõe perdas.
+- Pausa manual impede operações de estratégia, mas mantém posições; ciclos ainda avaliam os limites e podem liquidá-las. Falhas de preço impedem essa avaliação. Gaps e custos podem ultrapassar os limites.
+- Ativos com posição aberta não podem ser removidos da carteira até a saída pelo motor. Reduzir um peso impede novas entradas acima do teto, sem liquidar posições existentes imediatamente.
+- Mantém até 72 preços por ativo e 200 decisões. Não é histórico completo ou backtest.
 
-A compra debita o limite de entrada definido no motor, incluindo taxa simulada de 0,1%. O preço de compra tem deslizamento desfavorável de 0,1%; a venda usa deslizamento de 0,1% e desconta taxa de 0,1%. Só existe uma posição por vez. A exposição pode crescer com o preço após a compra; o teto de entrada limita o aporte por entrada. Não considera impostos, spread variável ou ordens mínimas de corretoras.
+## Desenvolvimento
 
-Perda observada acima do limite diário (America/Sao_Paulo) ou total configurado no motor provoca liquidação virtual e pausa. A base diária é a última avaliação disponível antes do primeiro ciclo do novo dia. A retomada após perda diária exige intervenção e só permite comprar quando o limite diário deixar de estar excedido; o limite total bloqueia retomada. Os limites são gatilhos, não garantias: gaps e custos podem superar os valores. Pausar manualmente mantém a posição e a avaliação de risco, mas impede negociações por estratégia.
-
-## Segurança e persistência
-
-Todas as rotas da API exigem Bearer token (mínimo 32 caracteres). O navegador guarda o token só em memória. O titular do token controla o robô simulado; revogue trocando o token na Vercel e no GitHub. Não há multiusuário nem gestão de sessões nesta versão. O HTML do painel é público, mas saldo e histórico exigem autenticação.
-
-O schema `trade_lab` não é exposto na API REST. É isolamento lógico dentro do mesmo banco: recursos, cotas e administradores continuam compartilhados com o CRM. Nenhuma tabela ou função é liberada para `anon` ou `authenticated`; a service role fica só na Vercel. Cada alteração usa compare-and-swap no banco: ticks concorrentes e pausas invalidam gravações anteriores. Uma execução por hora UTC, sem reposição retroativa de ciclos perdidos. Mantém até 72 preços e 200 decisões; não é um arquivo histórico permanente nem um backtest. Falhas aparecem no painel e no Actions; não há alertas por e-mail.
-
-## Desenvolver e testar
+Node >=22.8 (CI e Vercel: 22.x), npm. Não requer Docker.
 
 ```sh
-npm ci
+npm ci --ignore-scripts --no-audit --no-fund
 npm test
-cp .env.example .env
-# Preencha as variáveis apenas no seu computador.
+# Configure variáveis privadas, sem enviar .env para o Git.
 node --env-file=.env scripts/dev.mjs
 ```
 
-Abra http://localhost:3000. Os testes do banco usam PostgreSQL em WASM (PGlite) e não acessam dados de produção. Os testes de preço usam respostas simuladas. Para validar no destino, execute a migração e teste um ciclo real de coleta na hospedagem.
+No ambiente cloud, use um cache npm gravável: `npm ci --cache /workspace/.npm-cache --ignore-scripts --no-audit --no-fund`. Para chamadas remotas no Node 24 deste ambiente, `node --use-env-proxy` respeita o proxy configurado; preserve o trust TLS. O servidor local escuta a porta 3000. Os testes usam PostgreSQL em WASM (PGlite) e preços sintéticos, sem acessar produção.
 
-## Evolução
+## Hospedagem
 
-Antes de dinheiro real: armazenar histórico completo, medir desempenho com taxas da corretora, comparar com comprar e manter BTC, avaliar quedas e falhas prolongadas e integrar autenticação individual. Uma futura integração com corretora deve ser um trabalho separado, com autorização expressa, chaves sem saque e limites revisados. O protótipo não tem caminhos de execução de ordens reais.
+Vercel: preset Other, Node 22.x, saída `public`, sem build, funções em `api/`. Variáveis apenas no servidor: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` do projeto escolhido, `BOT_TOKEN` de pelo menos 32 caracteres e chave `COINGECKO_DEMO_API_KEY` opcional. Não use prefixos públicos.
 
-## Orçamento e instalações existentes
+Em uma instalação nova, aplique `supabase/001_trade_lab.sql` **uma única vez**, somente no projeto autorizado. Instalações existentes não precisam de nova migração para a carteira: a configuração usa o mesmo payload privado, preservando saldo, posições e histórico. Para estado legado sem `initialCapital`, configure `INITIAL_BALANCE_BRL` privadamente com o capital original. Não invente o valor nem reexecute a migração para redefini-lo. O motor BTC original continua funcionando até o usuário salvar uma carteira enquanto pausado.
 
-Os valores de bootstrap da migração e dos testes são fixtures sintéticas, sem relação com orçamento pessoal. Configure saldo, capital inicial e limites privadamente antes do primeiro ciclo. O campo `initialCapital` registra a base do resultado. Para estados de versões anteriores sem esse campo, configure `INITIAL_BALANCE_BRL` na Vercel com o capital original, sem alterar saldo ou histórico. Não reaplique a migração em uma instalação existente. Nunca publique exportações do banco, orçamento pessoal ou resultados.
+GitHub Actions precisa de `BOT_URL` (URL HTTPS de produção) e `BOT_TOKEN`, sem acesso ao banco. O workflow `simulation.yml` executa no minuto 17 de cada hora; precisa estar habilitado na branch padrão. Confirme uma execução manual e uma agendada antes de afirmar operação automática. Actions pode atrasar ou não executar pontualmente.
+
+## Segurança
+
+HTML público, dados financeiros e configuração acessíveis apenas com Bearer token. Token somente em memória da aba. O titular pode controlar a simulação; troque o token no servidor e Actions para revogar acesso. Todas as mutações usam compare-and-swap por versão; configurar também exige a versão exibida ao usuário e pausa.
+
+RLS e RPCs limitadas a service_role oferecem isolamento lógico no Supabase compartilhado, sem isolamento físico de recursos, cotas ou administradores. Nunca publique chaves, exportações do banco, orçamento ou resultados pessoais.

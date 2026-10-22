@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 import { initialState } from '../lib/engine.mjs';
+import { configurePortfolio, PROFILES } from '../lib/portfolio.mjs';
 
 test('migração real: isolamento por roles, saldo inicial e gravações concorrentes', async () => {
   const db = new PGlite();
@@ -28,5 +29,12 @@ test('migração real: isolamento por roles, saldo inicial e gravações concorr
     await assert.rejects(db.query('select public.trade_lab_commit($1,$2::jsonb)', [1, JSON.stringify({ ...initialState(), cash: -1 })]), /Estado inválido/);
     await assert.rejects(db.query("select public.trade_lab_commit(1, '{}'::jsonb)"), /Estado inválido/);
     assert.equal((await db.query('select public.trade_lab_read() as state')).rows[0].state.version, 1);
+    const multi = configurePortfolio(latest.payload, { ...PROFILES.moderado, profile: 'moderado' });
+    assert.equal((await db.query('select public.trade_lab_commit($1,$2::jsonb) as ok', [1, JSON.stringify(multi)])).rows[0].ok, true);
+    const restored = (await db.query('select public.trade_lab_read() as state')).rows[0].state;
+    assert.deepEqual(restored.payload.config, multi.config);
+    assert.equal(restored.payload.cash, latest.payload.cash);
+    assert.equal(restored.payload.paused, true);
+    assert.equal(restored.version, 2);
   } finally { await db.close(); }
 });
