@@ -47,9 +47,11 @@ function render(data) {
   $('pause').textContent = paused ? 'Iniciar / retomar' : 'Pausar';
   $('reason').textContent = s.reason;
   $('warmup').textContent = 'Cada ativo precisa de 24 observações horárias consecutivas. O botão iniciar habilita o motor; fechar esta aba não configura o agendador. Acompanhe a última execução.';
-  $('settings-fields').disabled = !paused;
-  $('config-state').textContent = s.config ? `Perfil base: ${profiles[s.config.profile].label} · ajustes personalizados` : 'Motor original BTC; pause para configurar multiativos';
-  $('config-note').textContent = paused ? 'Edite os parâmetros e salve antes de iniciar. Ativos com posição aberta só podem ser removidos após a saída pelo motor.' : 'Pause o bot para alterar ativos e limites com segurança.';
+  $('settings-fields').disabled = false;
+  $('save-settings').disabled = !paused || busy;
+  $('pause-settings').hidden = paused;
+  $('config-state').textContent = s.config ? `Perfil base: ${profiles[s.config.profile].label} · ajustes personalizados` : 'Motor original BTC; escolha um perfil para preparar sua carteira';
+  $('config-note').textContent = paused ? 'Edite os parâmetros e salve antes de iniciar. Ativos com posição aberta só podem ser removidos após a saída pelo motor.' : 'Você pode explorar e ajustar os perfis. Para aplicar as mudanças, clique em Pausar para salvar e depois em Salvar carteira e limites.';
   if (!dirty) fillSettings(s.config ?? { profile: 'moderado', ...profiles.moderado });
   $('holdings').replaceChildren();
   for (const a of catalogue) {
@@ -78,12 +80,13 @@ async function update(action = 'status', body) {
     const stale = latest && Date.now() - latest > 90 * 60000;
     $('message').textContent = stale ? 'Sem ciclo há mais de 90 minutos. Confira o agendamento no GitHub.' : `Conectado · consultado às ${date(Date.now())}${data.duplicate ? ' · Hora já processada' : ''}${action === 'configure' ? ' · Carteira salva, ainda pausada' : ''}`;
   } catch (error) { $('message').textContent = error.message; }
-  finally { busy = false; document.querySelectorAll('button').forEach(b => b.disabled = false); }
+  finally { busy = false; document.querySelectorAll('button').forEach(b => b.disabled = false); $('save-settings').disabled = !paused; }
 }
 $('settings').addEventListener('input', () => { dirty = true; mixSummary(); });
 $('profile').addEventListener('change', () => { const profile = $('profile').value; fillSettings({ ...profiles[profile], profile }); dirty = true; });
 $('settings').addEventListener('submit', event => {
   event.preventDefault();
+  if (!paused) { $('message').textContent = 'Pause a simulação antes de salvar a carteira.'; return; }
   const config = { profile: $('profile').value, allocations: {} };
   for (const key of fields) config[key] = Number($(key).value);
   for (const a of catalogue) { const value = Number($(`weight-${a.id}`).value); if (value) config.allocations[a.id] = value; }
@@ -93,5 +96,6 @@ $('connect').addEventListener('submit', event => { event.preventDefault(); token
 $('refresh').addEventListener('click', () => update());
 $('tick').addEventListener('click', () => update('tick'));
 $('pause').addEventListener('click', () => update(paused ? 'resume' : 'pause'));
+$('pause-settings').addEventListener('click', () => update('pause'));
 $('disconnect').addEventListener('click', () => { token = ''; version = null; dirty = false; $('dashboard').hidden = true; $('login').hidden = false; $('message').textContent = 'Desconectado'; });
 setInterval(() => { if (token && !dirty && !document.hidden && !$('dashboard').hidden) update(); }, 60000);
