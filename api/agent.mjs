@@ -1,39 +1,35 @@
-import { timingSafeEqual } from 'node:crypto';
 import { repository, runTick } from '../lib/services.mjs';
 import { equity, LIMITS } from '../lib/engine.mjs';
 import { ASSETS, PROFILES, configurePortfolio, stopReason } from '../lib/portfolio.mjs';
-
-async function readBody(req) {
-  if (req.body != null) {
-    const text = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
-    if (Buffer.byteLength(text) > 8192) throw new Error('Configuração muito grande');
-    return JSON.parse(text);
-  }
-  const chunks = []; let size = 0;
-  for await (const chunk of req) {
-    size += Buffer.byteLength(chunk);
-    if (size > 8192) throw new Error('Configuração muito grande');
-    chunks.push(Buffer.from(chunk));
-  }
-  return JSON.parse(Buffer.concat(chunks).toString());
-}
-
-export function authorized(header, token) {
-  if (!token || token.length < 32 || typeof header !== 'string') return false;
-  const expected = Buffer.from(`Bearer ${token}`), actual = Buffer.from(header);
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
-}
+import { readBody } from '../lib/http.mjs';
+import { authorized, requireUser, sameOrigin } from '../lib/auth.mjs';
+import { bootstrapTick } from '../lib/history.mjs';
+export { authorized } from '../lib/auth.mjs';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
-  if (!authorized(req.headers.authorization, process.env.BOT_TOKEN)) return res.status(401).json({ error: 'Token inválido ou servidor sem token de pelo menos 32 caracteres' });
+  res.setHeader('Vary', 'Cookie');
   const action = new URL(req.url, 'https://local.invalid').searchParams.get('action') ?? 'status';
-  if (!['status', 'tick', 'pause', 'resume', 'configure'].includes(action)) return res.status(400).json({ error: 'Ação desconhecida' });
-  if (req.method !== (action === 'status' ? 'GET' : 'POST')) return res.status(405).json({ error: 'Método não permitido' });
+  const scheduler = action === 'tick' && authorized(req.headers.authorization, process.env.BOT_TOKEN);
+  let userId = null;
+  if (!scheduler) {
+    try { userId = (await requireUser(req)).user.id; }
+    catch (error) { return res.status(error.status ?? 503).json({ error: error.status ? error.message : 'Serviço de acesso indisponível' }); }
+    if (req.method !== 'GET' && !sameOrigin(req)) return res.status(403).json({ error: 'Origem da solicitação inválida' });
+  }
+  if (!['status', 'tick', 'pause', 'resume', 'configure', 'audit', 'bootstrap'].includes(action)) return res.status(400).json({ error: 'Ação desconhecida' });
+  if (req.method !== (['status', 'audit'].includes(action) ? 'GET' : 'POST')) return res.status(405).json({ error: 'Método não permitido' });
   try {
     const repo = repository();
-    if (action === 'tick') {
-      const result = await runTick(repo);
+    const commit = repo.commit;
+    repo.commit = (version, state) => commit(version, { ...state, lastMutation: { actor: scheduler ? 'scheduler' : 'user', userId, action, at: new Date().toISOString() } });
+    if (action === 'audit') {
+      const raw = new URL(req.url, 'https://local.invalid').searchParams.get('before');
+      if (raw !== null && !/^[1-9][0-9]{0,14}$/.test(raw)) return res.status(400).json({ error: 'Página inválida' });
+      return res.status(200).json(await repo.audit(raw));
+    }
+    if (action === 'tick' || action === 'bootstrap') {
+      const result = action === 'bootstrap' ? await bootstrapTick(repo) : await runTick(repo);
       return res.status(200).json({ ...result, limits: LIMITS, assets: ASSETS, profiles: PROFILES });
     }
     const { version, state } = await repo.read();

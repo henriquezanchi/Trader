@@ -4,7 +4,7 @@ Laboratório de negociação **exclusivamente simulado**, com preços indicativo
 
 ## Carteira e perfis
 
-Após conectar com o `BOT_TOKEN`, pause o motor e abra **Perfil, ativos e limites**. Escolha um preset, ajuste os pesos e salve. Peso zero exclui um ativo sem posição aberta. Iniciar/retomar habilita a estratégia; o agendador externo precisa estar configurado para executar com a aba fechada. O painel consulta o estado, não substitui o agendador.
+Após entrar com e-mail e senha, pause o motor e abra **Perfil, ativos e limites**. Escolha um preset, ajuste os pesos e salve. Peso zero exclui um ativo sem posição aberta. Iniciar/retomar habilita a estratégia; o agendador externo precisa estar configurado para executar com a aba fechada. O painel consulta o estado, não substitui o agendador.
 
 | Preset | BTC | ETH | SOL | Caixa mínimo planejado | Entrada por ativo | Perda diária | Perda total | Meta / prazo |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
@@ -27,7 +27,7 @@ Estes perfis ilustrativos não são suitability bancário nem recomendações pe
 - Ao atingir perda, meta ou prazo, o motor liquida as posições virtuais e pausa. O prazo conta do primeiro início da carteira, incluindo pausas. Alterar parâmetros não reinicia essa data nem repõe perdas.
 - Pausa manual impede operações de estratégia, mas mantém posições; ciclos ainda avaliam os limites e podem liquidá-las. Falhas de preço impedem essa avaliação. Gaps e custos podem ultrapassar os limites.
 - Ativos com posição aberta não podem ser removidos da carteira até a saída pelo motor. Reduzir um peso impede novas entradas acima do teto, sem liquidar posições existentes imediatamente.
-- Mantém até 72 preços por ativo e 200 decisões. Não é histórico completo ou backtest.
+- Mantém até 72 preços por ativo e 200 decisões. O diário resumido mantém as últimas 200 decisões; o relatório privado persistente no banco preserva os registros novos sem esse corte. Não é backtest.
 
 ## Desenvolvimento
 
@@ -44,14 +44,26 @@ No ambiente cloud, use um cache npm gravável: `npm ci --cache /workspace/.npm-c
 
 ## Hospedagem
 
-Vercel: preset Other, Node 22.x, saída `public`, sem build, funções em `api/`. Variáveis apenas no servidor: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` do projeto escolhido, `BOT_TOKEN` de pelo menos 32 caracteres e chave `COINGECKO_DEMO_API_KEY` opcional. Não use prefixos públicos.
+Vercel: preset Other, Node 22.x, saída `public`, sem build, funções em `api/`. Variáveis apenas no servidor: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` e `SUPABASE_ANON_KEY` do projeto escolhido, `APP_ORIGIN` (origem HTTPS do painel), `TRADE_LAB_USER_IDS` e `TRADE_LAB_EMAILS` (listas privadas de contas autorizadas), `BOT_TOKEN` de pelo menos 32 caracteres e chave `COINGECKO_DEMO_API_KEY` opcional. Não use prefixos públicos.
 
-Em uma instalação nova, aplique `supabase/001_trade_lab.sql` **uma única vez**, somente no projeto autorizado. Instalações existentes não precisam de nova migração para a carteira: a configuração usa o mesmo payload privado, preservando saldo, posições e histórico. Para estado legado sem `initialCapital`, configure `INITIAL_BALANCE_BRL` privadamente com o capital original. Não invente o valor nem reexecute a migração para redefini-lo. O motor BTC original continua funcionando até o usuário salvar uma carteira enquanto pausado.
+Em uma instalação nova, aplique `supabase/001_trade_lab.sql` **uma única vez**, somente no projeto autorizado. A carteira usa o mesmo payload privado, preservando saldo, posições e histórico. O relatório persistente exige aplicar uma única vez a nova `supabase/002_audit.sql`, que cria apenas a tabela de auditoria, um trigger no estado do Trade Lab e a RPC de leitura privada; não altera tabelas de outros aplicativos nem reaplica 001. Para estado legado sem `initialCapital`, configure `INITIAL_BALANCE_BRL` privadamente com o capital original. Não invente o valor nem reexecute a migração para redefini-lo. O motor BTC original continua funcionando até o usuário salvar uma carteira enquanto pausado.
 
-GitHub Actions precisa de `BOT_URL` (URL HTTPS de produção) e `BOT_TOKEN`, sem acesso ao banco. O workflow `simulation.yml` executa no minuto 17 de cada hora; precisa estar habilitado na branch padrão. Confirme uma execução manual e uma agendada antes de afirmar operação automática. Actions pode atrasar ou não executar pontualmente.
+O agendador de produção é o cron do Supabase, no minuto 17 de cada hora UTC, com URL e token no Vault e função restrita no schema privado. O projeto precisa de pg_cron, pg_net e supabase_vault; configurar esse serviço é uma etapa administrativa separada, não parte das migrações portáveis. Confirme cron.job_run_details e o resultado HTTP de um disparo automático antes de afirmar operação automática. O workflow GitHub `simulation.yml` permanece como disparo manual de emergência com `BOT_URL` e `BOT_TOKEN`, sem acesso ao banco. Não habilite dois agendamentos concorrentes; compare-and-swap e a proteção por hora evitam ordens duplicadas, mas não garantem pontualidade.
 
 ## Segurança
 
-HTML público, dados financeiros e configuração acessíveis apenas com Bearer token. Token somente em memória da aba. O titular pode controlar a simulação; troque o token no servidor e Actions para revogar acesso. Todas as mutações usam compare-and-swap por versão; configurar também exige a versão exibida ao usuário e pausa.
+HTML público; dados e controles exigem uma conta explicitamente autorizada no Supabase Auth. O servidor valida a sessão e o ID/e-mail confirmado a cada pedido: contas de outros aplicativos do mesmo projeto não recebem acesso. Não há cadastro público de contas do Trade Lab. Tokens da sessão ficam em cookies HttpOnly, Secure e SameSite=Strict em produção, sem localStorage; a renovação é feita no servidor. Mutações do navegador exigem a origem configurada, sem confiar em Host recebido do cliente.
+
+O `BOT_TOKEN` serve exclusivamente para o agendador executar `POST /api/agent?action=tick`; não dá acesso ao painel, saldo ou configurações. Ele continua privado no servidor e GitHub Actions. Todas as mutações do estado usam compare-and-swap por versão; configurar também exige a versão exibida ao usuário e pausa.
+
+Contas existentes usam a senha atual do Supabase. Para uma conta nova ou senha esquecida, use **Definir ou recuperar senha** com um e-mail autorizado. Como a identidade é compartilhada no projeto, a troca de senha também afeta outros aplicativos que usam essa mesma conta; o instalador não altera senhas existentes. O Supabase envia o link pelo SMTP do projeto. O retorno precisa constar na lista de URLs permitidas do Auth (`APP_ORIGIN/` e `APP_ORIGIN/?recovery=1`). Adicione URLs preservando as de outros aplicativos; não altere o Site URL, SMTP, templates, cadastros ou senhas de outras contas. O link permite definir uma senha de pelo menos 12 caracteres. A recuperação não envia mensagens a e-mails fora da lista privada. O servidor exige autenticação válida antes de aceitar nova senha e limpa a sessão ao concluir.
+
+O painel exibe resumo das últimas 24 horas e o tamanho da sequência horária atual por ativo. Observações antigas mantidas no histórico não contam como aquecimento contínuo. Sem posições, o caixa virtual não rende.
 
 RLS e RPCs limitadas a service_role oferecem isolamento lógico no Supabase compartilhado, sem isolamento físico de recursos, cotas ou administradores. Nunca publique chaves, exportações do banco, orçamento ou resultados pessoais.
+
+## Iniciar sem esperar um dia e inspecionar decisões
+
+O botão **Preparar histórico e avaliar agora** obtém 23 amostras horárias reais de cada ativo na CoinGecko e uma cotação atual. Ele não inventa preços, não altera o capital e não executa operações retroativas. Exige carteira configurada/habilitada, nenhuma posição aberta, nenhuma preparação anterior e uma hora ainda não processada. Dados futuros, lacunas ou cotações atuais antigas impedem a gravação inteira. Mesmo com histórico completo, o resultado pode ser AGUARDAR por ausência de sinal. As amostras ao vivo anteriores são preservadas no contexto da preparação para inspeção; a janela de indicadores passa a usar o histórico validado.
+
+O **Relatório privado de decisões** guarda, na mesma transação que altera o estado, a versão, configuração, decisões novas, médias, preço/timestamp/fonte, custos, risco e estado antes/depois. Pode ser paginado; anon/authenticated não acessam a tabela ou RPC diretamente. O backend valida a conta antes de servir o relatório. Um snapshot do diário legado é preservado e explicitamente marcado: parâmetros não registrados no passado não são reconstruídos. Não há mecanismo de IA ou alteração automática de estratégia nesta versão.

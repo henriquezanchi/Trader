@@ -38,3 +38,44 @@ test('migração real: isolamento por roles, saldo inicial e gravações concorr
     assert.equal(restored.version, 2);
   } finally { await db.close(); }
 });
+
+test('auditoria privada é persistente, atômica, paginada e preserva parâmetros originais', async () => {
+  const db = new PGlite();
+  try {
+    await db.exec('create role anon; create role authenticated; create role service_role bypassrls;');
+    await db.exec(await readFile(new URL('../supabase/001_trade_lab.sql', import.meta.url), 'utf8'));
+    await db.exec(await readFile(new URL('../supabase/002_audit.sql', import.meta.url), 'utf8'));
+    const count = async () => Number((await db.query("select jsonb_array_length(public.trade_lab_audit_read(null)->'entries') as n")).rows[0].n);
+    assert.equal(await count(), 1);
+    for (const role of ['anon', 'authenticated']) {
+      await db.exec(`set role ${role}`);
+      await assert.rejects(db.query('select * from trade_lab.audit'), /permission denied/);
+      await assert.rejects(db.query('select public.trade_lab_audit_read(null)'), /permission denied/);
+      await db.exec('reset role');
+    }
+    await db.exec('set role service_role');
+    const s = initialState(1000); s.paused = true;
+    const multi = configurePortfolio(s, { ...PROFILES.moderado, profile: 'moderado' });
+    multi.events.push({ id: 'synthetic-decision', action: 'AGUARDAR', parameters: { engine: 'test', targetPct: 5 }, indicators: { fastMean: 101, slowMean: 100 } });
+    const commit = async (v, state) => (await db.query('select public.trade_lab_commit($1,$2::jsonb) as ok', [v, JSON.stringify(state)])).rows[0].ok;
+    assert.equal(await commit(0, multi), true); assert.equal(await count(), 2);
+    assert.equal(await commit(0, multi), false); assert.equal(await count(), 2);
+    const page = (await db.query('select public.trade_lab_audit_read(null) as page')).rows[0].page;
+    assert.equal(page.entries[0].decisions[0].parameters.targetPct, 5);
+    assert.equal(page.entries[0].parameters.targetPct, 5);
+    assert.equal(page.entries[1].kind, 'legacy_snapshot'); assert.equal(page.entries[1].parameters, null);
+    multi.config.targetPct = 10;
+    assert.equal(await commit(1, multi), true);
+    const changed = (await db.query('select public.trade_lab_audit_read(null) as page')).rows[0].page;
+    assert.equal(changed.entries[0].parameters.targetPct, 10);
+    assert.equal(changed.entries[0].decisions.length, 0); // Old decisions are never duplicated on config changes.
+    assert.equal(changed.entries[1].decisions[0].parameters.targetPct, 5);
+    await assert.rejects(db.query('delete from trade_lab.audit'), /permission denied/);
+    for (let v = 2; v < 33; v++) assert.equal(await commit(v, multi), true);
+    const first = (await db.query('select public.trade_lab_audit_read(null) as page')).rows[0].page;
+    assert.equal(first.entries.length, 30); assert.ok(first.nextCursor);
+    const older = (await db.query('select public.trade_lab_audit_read($1) as page', [first.nextCursor])).rows[0].page;
+    assert.equal(older.entries.length, 4);
+    assert.ok(older.entries.every(e => e.id < first.nextCursor));
+  } finally { await db.close(); }
+});

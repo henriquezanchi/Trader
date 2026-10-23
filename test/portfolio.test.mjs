@@ -92,7 +92,9 @@ test('API persiste configuração por versão, bloqueia conflito e exige token',
   let row = { version: 7, payload: initialState(1000) }; row.payload.paused = true;
   const token = 'test-token-'.repeat(5); let commits = 0;
   process.env.BOT_TOKEN = token; process.env.SUPABASE_URL = 'https://test.supabase.co'; process.env.SUPABASE_SERVICE_ROLE_KEY = 'synthetic-key';
+  process.env.APP_ORIGIN = 'https://trader-zanchi.vercel.app'; process.env.SUPABASE_ANON_KEY = 'synthetic-anon'; process.env.TRADE_LAB_USER_IDS = 'owner'; process.env.TRADE_LAB_EMAILS = 'owner@example.test';
   globalThis.fetch = async (url, opts) => {
+    if (url.endsWith('/auth/v1/user')) return { ok: true, json: async () => ({ id: 'owner', email: 'owner@example.test', email_confirmed_at: new Date().toISOString() }) };
     if (url.endsWith('trade_lab_read')) return { ok: true, json: async () => structuredClone(row) };
     const body = JSON.parse(opts.body); const ok = body.expected_version === row.version;
     if (ok) { row = { version: row.version + 1, payload: body.next_payload }; commits++; }
@@ -100,7 +102,7 @@ test('API persiste configuração por versão, bloqueia conflito e exige token',
   };
   async function call(expectedVersion, header = `Bearer ${token}`) {
     const res = { setHeader() {}, status(code) { this.code = code; return this; }, json(data) { this.data = data; } };
-    await handler({ headers: { authorization: header }, method: 'POST', url: '/api/agent?action=configure', body: { expectedVersion, config: config() } }, res);
+    await handler({ headers: { authorization: header, origin: 'https://trader-zanchi.vercel.app', ...(header === `Bearer ${token}` ? { cookie: '__Host-trade_lab_access=synthetic-session' } : {}) }, method: 'POST', url: '/api/agent?action=configure', body: { expectedVersion, config: config() } }, res);
     return res;
   }
   try {
@@ -110,6 +112,6 @@ test('API persiste configuração por versão, bloqueia conflito e exige token',
     assert.equal((await call(7)).code, 409); assert.equal(commits, 1);
   } finally {
     globalThis.fetch = savedFetch;
-    for (const key of ['BOT_TOKEN', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']) { if (savedEnv[key] == null) delete process.env[key]; else process.env[key] = savedEnv[key]; }
+    for (const key of ['BOT_TOKEN', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_ANON_KEY', 'TRADE_LAB_USER_IDS', 'TRADE_LAB_EMAILS', 'APP_ORIGIN']) { if (savedEnv[key] == null) delete process.env[key]; else process.env[key] = savedEnv[key]; }
   }
 });
