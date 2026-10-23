@@ -2,7 +2,7 @@ import { repository, runTick } from '../lib/services.mjs';
 import { equity, LIMITS } from '../lib/engine.mjs';
 import { ASSETS, PROFILES, configurePortfolio, stopReason } from '../lib/portfolio.mjs';
 import { readBody } from '../lib/http.mjs';
-import { authorized, requireUser, sameOrigin } from '../lib/auth.mjs';
+import { authorized, requireUser, sameOrigin, signedScheduler } from '../lib/auth.mjs';
 import { bootstrapTick } from '../lib/history.mjs';
 export { authorized } from '../lib/auth.mjs';
 
@@ -10,7 +10,7 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Vary', 'Cookie');
   const action = new URL(req.url, 'https://local.invalid').searchParams.get('action') ?? 'status';
-  const scheduler = action === 'tick' && authorized(req.headers.authorization, process.env.BOT_TOKEN);
+  const scheduler = action === 'tick' && (authorized(req.headers.authorization, process.env.BOT_TOKEN) || signedScheduler(req));
   let userId = null;
   if (!scheduler) {
     try { userId = (await requireUser(req)).user.id; }

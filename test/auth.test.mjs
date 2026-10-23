@@ -124,3 +124,25 @@ test('requisições grandes, método incorreto e provedor limitado falham com se
   r = await run('login', { email: owner.email, password: 'synthetic-password' }); assert.equal(r.code, 429);
   r = res(); await authHandler({ url: '/api/auth?action=login', method: 'GET', headers: {} }, r); assert.equal(r.code, 405);
 }));
+
+test('assinatura do cron é curta, restrita à mesma hora e não autoriza leitura', async () => sandbox(async ({ calls }) => {
+  const { signedScheduler } = await import('../lib/auth.mjs');
+  const { createHmac } = await import('node:crypto');
+  process.env.SCHEDULER_SIGNING_KEY = 'synthetic-scheduler-key-'.repeat(3);
+  const now = Date.parse('2026-10-23T19:17:00Z');
+  const stamp = String(now / 1000);
+  const signature = createHmac('sha256', process.env.SCHEDULER_SIGNING_KEY).update(`trade-lab:tick:${stamp}`).digest('hex');
+  const req = { headers: { 'x-trade-lab-time': stamp, 'x-trade-lab-signature': signature } };
+  assert.equal(signedScheduler(req, now), true);
+  assert.equal(signedScheduler(req, now + 91000), false);
+  assert.equal(signedScheduler(req, now - 6000), false);
+  assert.equal(signedScheduler({ headers: { ...req.headers, 'x-trade-lab-signature': 'a'.repeat(64) } }, now), false);
+  const fresh = String(Math.floor(Date.now() / 1000));
+  const signed = createHmac('sha256', process.env.SCHEDULER_SIGNING_KEY).update(`trade-lab:tick:${fresh}`).digest('hex');
+  const r = res(); await agentHandler({ url: '/api/agent?action=audit', method: 'GET', headers: { 'x-trade-lab-time': fresh, 'x-trade-lab-signature': signed } }, r);
+  assert.equal(r.code, 401); assert.equal(calls.length, 0);
+  // An old signature cannot be replayed into the next trading hour.
+  const boundary = Date.parse('2026-10-23T19:59:59Z'), t = String(boundary / 1000);
+  const sig = createHmac('sha256', process.env.SCHEDULER_SIGNING_KEY).update(`trade-lab:tick:${t}`).digest('hex');
+  assert.equal(signedScheduler({ headers: { 'x-trade-lab-time': t, 'x-trade-lab-signature': sig } }, boundary + 2000), false);
+}));
