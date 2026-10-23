@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { initialState } from '../lib/engine.mjs';
 import { configurePortfolio, PROFILES } from '../lib/portfolio.mjs';
-import { proposal, confirmProposal, simulateOrder, activeIds } from '../lib/assisted.mjs';
+import { proposal, confirmProposal, simulateOrder, activeIds, opportunities } from '../lib/assisted.mjs';
 const now = Date.parse('2026-10-23T12:00:00Z');
 const make = () => { const s = initialState(1000); s.paused = true; const p = configurePortfolio(s, { ...structuredClone(PROFILES.moderado), profile: 'moderado' }); p.paused = false; return p; };
 const quotes = s => Object.fromEntries(activeIds(s).map(id => [id, {price: 100, observedAt: new Date(now).toISOString()}]));
@@ -24,4 +24,14 @@ test('proposta rejeita adulteração, outro usuário, vencimento, preço alterad
  assert.throws(()=>proposal(s,q,{asset:'bitcoin',action:'COMPRAR',amount:1000},3,'owner',now),/excede/);
  assert.throws(()=>proposal(s,q,{asset:'bitcoin',action:'COMPRAR',amount:10},3,'owner',now+121000),/dois minutos/);
  s.paused=true; assert.throws(()=>proposal(s,q,{asset:'bitcoin',action:'COMPRAR',amount:10},3,'owner',now),/Inicie/);
+});
+
+test('sugestões explicam saída por tendência, espera e pausa sem negociar',()=>{
+ const s=make(),q=quotes(s);for(const p of Object.values(s.portfolio))p.observations=Array.from({length:24},(_,i)=>({at:new Date(now-(24-i)*3600000).toISOString(),price:100}));
+ s.portfolio.bitcoin.quantity=.1;s.cash-=10;
+ s.portfolio.bitcoin.observations.forEach((o,i)=>o.price=125-i);
+ const original=structuredClone(s),items=opportunities(s,q,now);
+ assert.equal(items.find(i=>i.asset==='bitcoin').action,'VENDER');assert.match(items.find(i=>i.asset==='bitcoin').reason,/Média de 6h/);
+ assert.equal(items.find(i=>i.asset==='ethereum').action,'AGUARDAR');assert.match(items.find(i=>i.asset==='ethereum').reason,/RSI/);assert.deepEqual(s,original);
+ s.paused=true;assert.match(opportunities(s,q,now).find(i=>i.asset==='ethereum').reason,/pausada/);
 });

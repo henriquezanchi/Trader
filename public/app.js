@@ -229,7 +229,7 @@ async function scanOpportunities() {
       $('assist-opportunities').append(card);
     }
     $('assist-status').textContent = `Mercado consultado às ${date(data.asOf)}. Consultar e abrir uma proposta não movimentam a carteira.`;
-  } catch (e) { if ([401, 403].includes(e.status)) showLogin(); $('assist-status').textContent = e.message; }
+  } catch (e) { $('assist-opportunities').replaceChildren(); clearProposal(); if ([401, 403].includes(e.status)) showLogin(); $('assist-status').textContent = `${e.message}. Sugestões anteriores removidas; consulte novamente para obter dados atualizados.`; }
   finally { assistBusy = false; $('assist-scan').disabled = false; syncProposalButton(); }
 }
 async function previewOrder(order) {
