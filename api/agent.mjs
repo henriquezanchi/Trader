@@ -30,6 +30,7 @@ export default async function handler(req, res) {
     }
     if (action === 'tick' || action === 'bootstrap') {
       const result = action === 'bootstrap' ? await bootstrapTick(repo) : await runTick(repo);
+      if (scheduler) return res.status(200).json({ duplicate: result.duplicate, version: result.version });
       return res.status(200).json({ ...result, limits: LIMITS, assets: ASSETS, profiles: PROFILES });
     }
     const { version, state } = await repo.read();

@@ -115,7 +115,7 @@ test('agendador continua podendo executar tick sem login ou Origin de navegador'
     throw new Error('Unexpected provider request');
   });
   const r = res(); await agentHandler({ url: '/api/agent?action=tick', method: 'POST', headers: { authorization: `Bearer ${process.env.BOT_TOKEN}` } }, r);
-  assert.equal(r.code, 200); assert.equal(r.data.state.events.at(-1).action, 'AGUARDAR');
+  assert.equal(r.code, 200); assert.equal(r.data.duplicate, false); assert.equal(r.data.version, 2); assert.ok(!('state' in r.data));
 }));
 
 test('requisições grandes, método incorreto e provedor limitado falham com segurança', async () => sandbox(async ({ run, setProvider }) => {
