@@ -14,7 +14,7 @@ test('histórico seleciona 23 horas passadas reais, rejeita lacunas e não usa d
   const h = hourlyHistory([...prices, [now + 3600000, 1e7]], now);
   assert.equal(h.length, 23); assert.ok(h.every(x => x.historical && Date.parse(x.at) < now));
   assert.equal(h.at(-1).price, 147);
-  assert.throws(() => hourlyHistory(prices.slice(0, -1), now), /incompleto/);
+  assert.throws(() => hourlyHistory(prices.slice(0, -1), now), /incompleto|contínuo/);
   assert.throws(() => hourlyHistory(prices.map(([t]) => [t, -1]), now), /incompleto/);
 });
 
@@ -51,4 +51,11 @@ test('pausa concorrente invalida preparação inteira por CAS, sem sobrescrever 
   const provider = async u => { if (!interrupted) { interrupted = true; current.paused = true; version++; } return fetcher(u); };
   await assert.rejects(bootstrapTick(repo, provider, now), /concurrent control/);
   assert.equal(current.paused, true); assert.equal(current.cash, 1000); assert.equal(current.bootstrap, undefined);
+});
+
+test('histórico usa amostra recente da fonte sem depender do início da hora UTC', () => {
+  const later = Date.parse('2026-10-23T19:55:00Z');
+  const h = hourlyHistory([...prices, [Date.parse('2026-10-23T19:00:00Z'), 150], [Date.parse('2026-10-23T19:50:00Z'), 1e6]], later);
+  assert.equal(h.length, 23); assert.equal(h.at(-1).price, 150);
+  assert.equal(h.at(-1).at, '2026-10-23T19:00:00.000Z');
 });
