@@ -5,7 +5,7 @@
   "type": "module",
   "engines": { "node": ">=22.8" },
   "scripts": {
-    "test": "node --test --test-isolation=none",
+    "test": "node --test",
     "start": "node scripts/dev.mjs",
     "tick": "node scripts/tick.mjs"
   },
