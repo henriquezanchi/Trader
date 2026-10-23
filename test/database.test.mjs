@@ -79,3 +79,18 @@ test('auditoria privada é persistente, atômica, paginada e preserva parâmetro
     assert.ok(older.entries.every(e => e.id < first.nextCursor));
   } finally { await db.close(); }
 });
+
+test('pesquisa privada: trigger atômico, versão concorrente e paginação', async()=>{
+ const db=new PGlite();try{
+ await db.exec('create role anon; create role authenticated; create role service_role bypassrls;');
+ for(const migration of ['001_trade_lab.sql','002_audit.sql','003_research.sql'])await db.exec(await readFile(new URL('../supabase/'+migration,import.meta.url),'utf8'));
+ for(const role of ['anon','authenticated']){await db.exec('set role '+role);await assert.rejects(db.query('select public.trade_lab_research_read(null)'),/permission denied/);await assert.rejects(db.query('select * from trade_lab.research_cycles'),/permission denied/);await db.exec('reset role');}
+ await db.exec('set role service_role');const s=initialState(1000);
+ const commit=async(v)=>(await db.query('select public.trade_lab_commit($1,$2::jsonb) as ok',[v,JSON.stringify(s)])).rows[0].ok;
+ for(let v=0;v<14;v++){s.researchDelta={slot:v};assert.equal(await commit(v),true);assert.equal(await commit(v),false);}
+ const page=(await db.query('select public.trade_lab_research_read(null) as page')).rows[0].page;assert.equal(page.entries.length,12);assert.equal(page.entries[0].data.slot,13);
+ const older=(await db.query('select public.trade_lab_research_read($1) as page',[page.nextCursor])).rows[0].page;assert.equal(older.entries.length,2);
+ assert.equal(await commit(14),true);const unchanged=(await db.query('select public.trade_lab_research_read(null) as page')).rows[0].page;assert.equal(unchanged.entries[0].state_version,14);
+ await assert.rejects(db.query('delete from trade_lab.research_cycles'),/permission denied/);
+ }finally{await db.close();}
+});

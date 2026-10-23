@@ -3,11 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.8" },
+  "engines": {
+    "node": ">=22.8"
+  },
   "scripts": {
     "test": "node --test",
     "start": "node scripts/dev.mjs",
     "tick": "node scripts/tick.mjs"
   },
-  "devDependencies": { "@electric-sql/pglite": "0.3.14" }
+  "devDependencies": {
+    "@electric-sql/pglite": "0.3.14"
+  },
+  "dependencies": {
+    "fast-xml-parser": "5.11.2"
+  }
 }

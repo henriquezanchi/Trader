@@ -10,7 +10,7 @@ async function authCall(action, body) {
   return data;
 }
 async function request(action = 'status', body, retry = true, before) {
-  const response = await fetch(`/api/agent?action=${action}${before ? `&before=${encodeURIComponent(before)}` : ''}`, { method: ['status', 'audit'].includes(action) ? 'GET' : 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}), cache: 'no-store', signal: AbortSignal.timeout(35000) });
+  const response = await fetch(`/api/agent?action=${action}${before ? `&before=${encodeURIComponent(before)}` : ''}`, { method: ['status', 'audit', 'opportunities', 'research'].includes(action) ? 'GET' : 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}), cache: 'no-store', signal: AbortSignal.timeout(35000) });
   if (response.status === 401 && retry) { await authCall('refresh'); return request(action, body, false, before); }
   const data = await response.json();
   if (!response.ok) { const error = new Error(data.error ?? 'Serviço indisponível'); error.status = response.status; throw error; }
@@ -19,6 +19,7 @@ async function request(action = 'status', body, retry = true, before) {
 function showLogin() {
   connected = false; version = null; dirty = false;
   $('dashboard').hidden = true; $('audit-panel').hidden = true; $('audit-entries').replaceChildren(); $('reset-panel').hidden = true; $('login').hidden = false;
+  clearProposal(); $('assist-enabled').checked = false; $('assist-opportunities').replaceChildren(); $('research-entries').replaceChildren();
   $('password').value = ''; $('new-password').value = ''; $('confirm-password').value = '';
 }
 function sequenceLength(observations) {
@@ -56,6 +57,12 @@ function render(data) {
     }
   }
   $('dashboard').hidden = false; $('audit-panel').hidden = false; $('login').hidden = true;
+  if (currentProposal && currentProposal.version !== data.version) { clearProposal(); $('assist-status').textContent = 'A carteira mudou; solicite uma nova proposta.'; }
+  renderIntelligence(s);
+  const activeAssets = [...new Set([...Object.keys(s.config?.allocations ?? {}), ...Object.keys(s.portfolio ?? {}).filter(id => s.portfolio[id].quantity > 0)])];
+  const chosen = $('assist-asset').value; $('assist-asset').replaceChildren();
+  for (const id of activeAssets) { const o = document.createElement('option'); o.value = id; o.textContent = catalogue.find(a => a.id === id)?.symbol ?? id; $('assist-asset').append(o); }
+  if (activeAssets.includes(chosen)) $('assist-asset').value = chosen;
   const holdings = s.portfolio ?? { bitcoin: { quantity: s.btc, lastPrice: s.lastPrice, observations: s.observations } };
   const exposure = Object.values(holdings).reduce((v, p) => v + p.quantity * (p.lastPrice ?? 0), 0), total = s.cash + exposure;
   $('equity').textContent = money(total); $('cash').textContent = money(s.cash);
@@ -113,7 +120,7 @@ async function update(action = 'status', body) {
     const stale = latest && Date.now() - latest > 90 * 60000;
     $('message').textContent = stale ? 'Sem ciclo há mais de 90 minutos. Confira o agendador e o relatório privado.' : `Conectado · consultado às ${date(Date.now())}${data.duplicate ? ' · Hora já processada' : ''}${action === 'configure' ? ' · Carteira salva, ainda pausada' : action === 'bootstrap' ? ' · Histórico real preparado; ciclo atual avaliado' : ''}`;
   } catch (error) { if ([401, 403].includes(error.status)) showLogin(); $('message').textContent = error.message; }
-  finally { busy = false; document.querySelectorAll('button').forEach(b => b.disabled = false); $('save-settings').disabled = !paused; $('bootstrap').disabled = paused; }
+  finally { busy = false; document.querySelectorAll('button').forEach(b => b.disabled = false); $('save-settings').disabled = !paused; $('bootstrap').disabled = paused; syncProposalButton(); }
 }
 $('settings').addEventListener('input', () => { dirty = true; mixSummary(); });
 $('profile').addEventListener('change', () => { const profile = $('profile').value; fillSettings({ ...profiles[profile], profile }); dirty = true; });
@@ -158,7 +165,7 @@ $('disconnect').addEventListener('click', async () => {
   try { await authCall('logout'); showLogin(); $('message').textContent = 'Você saiu da conta'; }
   catch (error) { showLogin(); $('message').textContent = error.message; }
 });
-setInterval(() => { if (connected && !dirty && !document.hidden && !$('dashboard').hidden) update(); }, 60000);
+setInterval(async () => { if (connected && !dirty && !document.hidden && !$('dashboard').hidden) { await update(); if ($('assist-enabled').checked && !currentProposal) await scanOpportunities(); } }, 60000);
 async function restoreSession() {
   const hash = new URLSearchParams(location.hash.slice(1));
   const recovery = hash.get('type') === 'recovery' || new URLSearchParams(location.search).get('recovery') === '1';
@@ -179,7 +186,6 @@ async function restoreSession() {
     connected = true; await update();
   } catch (error) { if (error.status !== 401) $('message').textContent = error.message; }
 }
-restoreSession();
 
 let auditCursor = null;
 async function loadAudit(before = null) {
@@ -201,3 +207,100 @@ async function loadAudit(before = null) {
 }
 $('audit-refresh').addEventListener('click', () => loadAudit());
 $('audit-more').addEventListener('click', () => loadAudit(auditCursor));
+
+let currentProposal = null, assistBusy = false, researchCursor = null;
+function clearProposal() { currentProposal = null; $('proposal-card').hidden = true; }
+function syncProposalButton() {
+  const valid = currentProposal && Date.now() < currentProposal.expiresAt;
+  $('proposal-confirm').disabled = !valid || assistBusy || busy;
+  if (currentProposal) $('proposal-expiry').textContent = valid ? `Válida por mais ${Math.ceil((currentProposal.expiresAt - Date.now()) / 1000)} segundos` : 'Proposta vencida. Consulte o mercado novamente.';
+}
+async function scanOpportunities() {
+  if (!connected || assistBusy || document.hidden) return;
+  assistBusy = true; $('assist-scan').disabled = true;
+  try {
+    const data = await request('opportunities'); $('assist-opportunities').replaceChildren();
+    for (const item of data.opportunities) {
+      const card = document.createElement('article'), title = document.createElement('h3'), info = document.createElement('p'), button = document.createElement('button');
+      title.textContent = `${catalogue.find(a => a.id === item.asset)?.symbol ?? item.asset} · ${item.action}`;
+      info.textContent = `${money(item.price)} · fonte às ${date(item.observedAt)}. ${item.reason}`;
+      card.append(title, info);
+      if (item.action !== 'AGUARDAR') { button.textContent = `Ver proposta de ${item.action === 'COMPRAR' ? 'compra' : 'venda'}`; button.addEventListener('click', () => previewOrder({ asset: item.asset, action: item.action })); card.append(button); }
+      $('assist-opportunities').append(card);
+    }
+    $('assist-status').textContent = `Mercado consultado às ${date(data.asOf)}. Consultar e abrir uma proposta não movimentam a carteira.`;
+  } catch (e) { if ([401, 403].includes(e.status)) showLogin(); $('assist-status').textContent = e.message; }
+  finally { assistBusy = false; $('assist-scan').disabled = false; syncProposalButton(); }
+}
+async function previewOrder(order) {
+  if (assistBusy || !connected) return;
+  assistBusy = true; clearProposal();
+  try {
+    const { proposal: p } = await request('preview', order); currentProposal = p;
+    $('proposal-title').textContent = `${p.action === 'COMPRAR' ? 'Comprar' : 'Vender'} ${catalogue.find(a => a.id === p.asset)?.symbol ?? p.asset} · somente simulação`;
+    $('proposal-summary').textContent = `${p.quantity.toFixed(8)} unidades · preço de execução estimado ${money(p.executionPrice)} · taxa ${money(p.fee)} · ${p.action === 'COMPRAR' ? 'débito' : 'crédito'} ${money(Math.abs(p.amount))}.`;
+    $('proposal-impact').textContent = `Saldo após operação: ${money(p.after.cash)}. Patrimônio marcado ao preço atual: ${money(p.after.equity)} (impacto inicial ${money(p.after.equity - p.before.equity)}).${p.realizedPnl != null ? ` Resultado realizado estimado da posição: ${money(p.realizedPnl)}.` : ''}`;
+    $('proposal-scenarios').replaceChildren();
+    for (const row of p.scenarios) cells($('proposal-scenarios'), [`${row.changePct > 0 ? '+' : ''}${row.changePct}%`, money(row.equityAfterExit), money(row.differenceVsBefore)]);
+    $('proposal-confirm').textContent = `Confirmar ${p.action === 'COMPRAR' ? 'compra' : 'venda'} simulada`;
+    $('proposal-card').hidden = false; $('proposal-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (e) { if ([401, 403].includes(e.status)) showLogin(); $('assist-status').textContent = e.message; }
+  finally { assistBusy = false; syncProposalButton(); }
+}
+$('assist-scan').addEventListener('click', scanOpportunities);
+$('assist-enabled').addEventListener('change', () => { if ($('assist-enabled').checked) scanOpportunities(); });
+$('assist-action').addEventListener('change', () => { $('assist-amount-label').hidden = $('assist-action').value !== 'COMPRAR'; });
+$('assisted-form').addEventListener('submit', event => {
+  event.preventDefault(); const body = { asset: $('assist-asset').value, action: $('assist-action').value };
+  if (body.action === 'COMPRAR' && $('assist-amount').value) body.amount = Number($('assist-amount').value);
+  previewOrder(body);
+});
+$('proposal-cancel').addEventListener('click', clearProposal);
+$('proposal-confirm').addEventListener('click', async () => {
+  if (!currentProposal || assistBusy || Date.now() >= currentProposal.expiresAt) return;
+  const token = currentProposal.token; assistBusy = true; syncProposalButton();
+  try {
+    const data = await request('confirm', { token }); clearProposal(); render(data);
+    $('assist-status').textContent = `Operação simulada registrada: ${data.execution.action}. Taxa ${money(data.execution.fee)}. Consulte o diário e o relatório privado.`;
+  } catch (e) { clearProposal(); if ([401, 403].includes(e.status)) showLogin(); $('assist-status').textContent = e.message; }
+  finally { assistBusy = false; syncProposalButton(); }
+});
+setInterval(syncProposalButton, 1000);
+function renderIntelligence(s) {
+  const r = s.intelligence, latest = r?.latest;
+  $('model-metrics').replaceChildren(); $('shadow-results').replaceChildren(); $('news-list').replaceChildren();
+  $('intelligence-status').textContent = s.researchError?.message ?? (r ? `Pesquisa atualizada em ${date(r.updatedAt)}. Modelo de 6h: ${r.metrics[6].trained}/100 resultados para liberar entradas na carteira experimental. Sem troca automática do motor principal.` : 'A pesquisa começará no próximo ciclo; você também pode atualizar agora.');
+  if (!r) { $('news-sources').textContent = 'Fontes ainda não consultadas.'; return; }
+  for (const h of [1, 6, 24]) {
+    const m = r.metrics[h], card = document.createElement('article'), title = document.createElement('h3'), p = document.createElement('p');
+    title.textContent = `Horizonte ${h}h`; p.textContent = `${m.scored} resultados avaliados · ${m.missed} sem preço adequado · acerto ${m.accuracy == null ? 'sem dados' : `${(m.accuracy * 100).toFixed(1)}%`} · Brier ${m.brier == null ? 'sem dados' : m.brier.toFixed(3)} (menor é melhor).`; card.append(title, p); $('model-metrics').append(card);
+  }
+  for (const row of latest?.experiment?.summaries ?? []) cells($('shadow-results'), [{ baseline: 'Referência MA 6/24', 'rsi-confirmed': 'Tendência + RSI', learned: 'Modelo aprendido' }[row.id], `${row.returnPct.toFixed(2)}%`, `${row.maxDrawdownPct.toFixed(2)}%`, String(row.trades), row.status === 'learning' ? 'Aprendendo, sem entradas' : row.paused ? 'Pausada por limite' : 'Somente pesquisa']);
+  const benchmark = latest?.experiment?.benchmark;
+  if (benchmark) cells($('shadow-results'), ['Comprar e manter o mix', `${benchmark.returnPct.toFixed(2)}%`, 'Não calculado', 'Compra inicial', 'Benchmark sem stops']);
+  $('news-sources').textContent = (r.news?.sources ?? []).map(source => `${source.source}: ${source.status}`).join(' · ');
+  for (const item of r.news?.items ?? []) {
+    const p = document.createElement('p'), link = document.createElement('a'), meta = document.createElement('small');
+    link.href = item.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = item.title;
+    meta.textContent = ` · ${item.publisher} · publicado ${date(item.publishedAt)} · observado ${date(item.firstSeenAt)} · tom lexical ${item.score.toFixed(1)}`;
+    p.append(link, meta); $('news-list').append(p);
+  }
+}
+$('research-refresh').addEventListener('click', () => update('research-refresh'));
+async function loadResearch(before = null) {
+  if (!connected) return;
+  $('research-log').disabled = true; $('research-more').disabled = true;
+  try {
+    const data = await request('research', undefined, true, before);
+    if (!before) $('research-entries').replaceChildren();
+    for (const entry of data.entries) {
+      const detail = document.createElement('details'), summary = document.createElement('summary'), pre = document.createElement('pre');
+      summary.textContent = `${date(entry.recorded_at)} · pesquisa da versão ${entry.state_version}`; pre.textContent = JSON.stringify(entry.data, null, 2); detail.append(summary, pre); $('research-entries').append(detail);
+    }
+    researchCursor = data.nextCursor; $('research-more').hidden = !researchCursor; $('research-message').textContent = 'Registros com fontes, indicadores, previsões e resultados disponíveis depois de cada horizonte.';
+  } catch (e) { if ([401, 403].includes(e.status)) showLogin(); $('research-message').textContent = e.message; }
+  finally { $('research-log').disabled = false; $('research-more').disabled = false; }
+}
+$('research-log').addEventListener('click', () => loadResearch());
+$('research-more').addEventListener('click', () => loadResearch(researchCursor));
+restoreSession();

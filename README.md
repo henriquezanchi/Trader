@@ -67,3 +67,17 @@ RLS e RPCs limitadas a service_role oferecem isolamento lógico no Supabase comp
 O botão **Preparar histórico e avaliar agora** obtém 23 amostras horárias reais de cada ativo na CoinGecko e uma cotação atual. Ele não inventa preços, não altera o capital e não executa operações retroativas. Exige carteira configurada/habilitada, nenhuma posição aberta, nenhuma preparação anterior e uma hora ainda não processada. Dados futuros, lacunas ou cotações atuais antigas impedem a gravação inteira. Mesmo com histórico completo, o resultado pode ser AGUARDAR por ausência de sinal. As amostras ao vivo anteriores são preservadas no contexto da preparação para inspeção; a janela de indicadores passa a usar o histórico validado.
 
 O **Relatório privado de decisões** guarda, na mesma transação que altera o estado, a versão, configuração, decisões novas, médias, preço/timestamp/fonte, custos, risco e estado antes/depois. Pode ser paginado; anon/authenticated não acessam a tabela ou RPC diretamente. O backend valida a conta antes de servir o relatório. Um snapshot do diário legado é preservado e explicitamente marcado: parâmetros não registrados no passado não são reconstruídos. Não há mecanismo de IA ou alteração automática de estratégia nesta versão.
+
+### Participar de uma operação simulada
+
+No painel autenticado, **Modo assistido** consulta cotações indicativas e sugere entradas ou saídas. A atualização por minuto é opcional e só ocorre com a aba visível. Também é possível escolher um ativo da carteira e solicitar uma prévia manual. A prévia mostra taxas, deslizamento, saldo resultante e cenários de variação de preço; não promete lucro. Apenas **Confirmar** executa a operação simulada. Propostas expiram em 60 segundos e são invalidadas por alteração de versão da carteira ou movimento de preço superior a 0,2%. Compras respeitam os limites existentes; vendas permitem reduzir posições durante a pausa. Nenhuma ordem é enviada a corretoras.
+
+### Pesquisa e aprendizado incremental
+
+A migração adicional `supabase/003_research.sql` cria o histórico privado de pesquisa, sem recriar estado ou auditoria anteriores. Aplicar uma vez após as migrações existentes. Somente o servidor possui acesso ao RPC de leitura; o painel exige sessão autorizada.
+
+A cada ciclo horário são registrados indicadores técnicos, volume disponível e manchetes RSS com fonte, data de publicação e primeira observação. O tom das manchetes usa um vocabulário fixo, identificado como `headline-lexicon-v1`; não é análise de texto por Claude. Falhas nas fontes ficam explícitas. A chave Anthropic não é utilizada por este módulo.
+
+Modelos logísticos incrementais estimam retornos positivos após custos em horizontes de 1, 6 e 24 horas. Cada previsão é registrada antes do resultado; a avaliação usa a probabilidade original e só depois atualiza o modelo. Sem preço próximo ao horizonte, registra resultado ausente. As primeiras previsões partem de 50%, sem evidência aprendida.
+
+Três estratégias são comparadas em carteiras paralelas normalizadas de 1000 unidades, com os mesmos limites percentuais e custos: médias móveis, confirmação por RSI e modelo aprendido. Não são saldos do usuário. Mudanças de configuração abrem nova comparação. Nenhuma estratégia substitui automaticamente a ativa. O modelo aprendido exige 100 resultados de treinamento; uma indicação para revisão exige ao menos 14 dias, 200 resultados de 6h, 10 negociações e comparação de retorno e drawdown. Esses critérios são mínimos experimentais, sem garantia de desempenho.
