@@ -8,3 +8,10 @@ fieldset{border:0;margin:0;padding:0;min-width:0}fieldset:disabled{opacity:.65}.
 .intelligence-details > summary { cursor: pointer; }
 .intelligence-details > summary h2 { display: inline-block; margin: .6rem 1rem .6rem 0; }
 .intelligence-details > summary .eyebrow { display: block; }
+
+#chart-points circle { fill: #a9ef76; cursor: pointer; stroke: #101811; stroke-width: 2; }
+#chart-points circle:hover, #chart-points circle:focus { r: 7; stroke: #fff; outline: none; }
+.selected-cycle { background: #263a21; outline: 1px solid #a9ef76; }
+#diary-latest { display: block; }
+#events summary { cursor: pointer; white-space: nowrap; }
+#events pre { max-width: 34rem; max-height: 26rem; overflow: auto; white-space: pre-wrap; }

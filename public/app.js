@@ -1,3 +1,4 @@
+let discoveredAssets = {};
 let connected = false, paused = false, version = null, catalogue = [], profiles = {}, dirty = false, busy = false;
 const $ = id => document.getElementById(id);
 const money = value => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
@@ -36,6 +37,7 @@ function cells(parent, texts) {
   const row = document.createElement('tr');
   for (const text of texts) { const cell = document.createElement('td'); cell.textContent = text; row.append(cell); }
   parent.append(row);
+  return row;
 }
 function fillSettings(c) {
   $('profile').value = c.profile;
@@ -49,7 +51,7 @@ function mixSummary() {
   $('mix-summary').textContent = `Pesos: ${sum.toFixed(1)}% · reserva mínima planejada: ${(100 - sum).toFixed(1)}% · limites em % do capital virtual inicial`;
 }
 function render(data) {
-  const s = data.state; version = data.version; connected = true; $('reset-panel').hidden = true;
+  const s = data.state; discoveredAssets=s.discovery?.assets??{}; version = data.version; connected = true; $('reset-panel').hidden = true;
   if (!catalogue.length) {
     catalogue = data.assets; profiles = data.profiles;
     for (const a of catalogue) {
@@ -102,17 +104,19 @@ function render(data) {
   $('activity-summary').textContent = `${cycles.size} ciclos ao vivo registrados · ${historicalSamples} amostras históricas para indicadores · ${trades} compras ou vendas simuladas · ${recentEvents.filter(e => e.action === 'AGUARDAR').length} decisões de aguardar.`;
   $('activity-reason').textContent = trades ? 'Veja as decisões e seus motivos no diário abaixo. Taxas e deslizamento contam no resultado e nos limites de perda.' : warming ? 'Sem negociações: a sequência de 24 observações horárias ainda não está completa. Intervalos maiores que 90 minutos interrompem a sequência. Sem posições, o caixa virtual não rende.' : s.paused ? 'A simulação está pausada. Veja os motivos no diário abaixo.' : s.config?.cryptoStrategy==='dca-weekly' ? 'DCA semanal: o ciclo verifica a data do próximo aporte e o teto de 5% em BTC; não é uma estratégia de trade diário.' : 'A janela de dados está completa; o motor aguarda um sinal e respeita os limites configurados.';
   const latestEvent=s.events.at(-1), latestCycle=latestEvent?s.events.filter(e=>e.at===latestEvent.at):[];
-  $('diary-latest').textContent=latestEvent?`Último ciclo ${date(latestEvent.at)} · ${latestCycle.length} decisões · mais recente: ${catalogue.find(a=>a.id===latestEvent.asset)?.symbol??'Dados'} ${latestEvent.action} — ${latestEvent.reason}`:'Aguardando primeiro ciclo.';
+  $('diary-latest').textContent=latestEvent?`Último ciclo ${date(latestEvent.at)} · ${latestCycle.length} decisões · mais recente: ${catalogue.find(a=>a.id===latestEvent.asset)?.symbol??'Dados'} ${latestEvent.action}`:'Aguardando primeiro ciclo.';
   $('events').replaceChildren();
   for (const event of [...s.events].reverse()) {
     const symbol = event.action==='APORTE'?'':catalogue.find(a => a.id === (event.asset ?? 'bitcoin'))?.symbol ?? '';
-    cells($('events'), [date(event.at), `${symbol} · ${event.action}${event.mode==='fast'?' · CURTO':event.mode==='assisted'?' · ASSISTIDO':event.mode==='core'?' · CENÁRIO':event.mode==='data'?' · DADOS':''}`, event.reason, money(event.fee??0), money(event.equity)]);
+    const row=cells($('events'), [date(event.at), `${symbol} · ${event.action}${event.mode==='fast'?' · CURTO':event.mode==='assisted'?' · ASSISTIDO':event.mode==='core'?' · CENÁRIO':event.mode==='data'?' · DADOS':''}`, '', money(event.fee??0), money(event.equity)]);
+    row.dataset.cycle=event.at;
+    const detail=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Ver decisão';detail.append(summary);
+    detail.addEventListener('toggle',()=>{if(detail.open&&!detail.dataset.loaded){detail.dataset.loaded='true';const reason=document.createElement('p'),pre=document.createElement('pre');reason.textContent=event.reason;pre.textContent=JSON.stringify({parameters:event.parameters,indicators:event.indicators,quote:event.quote,before:event.before,after:event.after,learning:event.learning,realizedPnl:event.realizedPnl},null,2);detail.append(reason,pre);}});
+    row.children[2].append(detail);
   }
   $('empty').textContent = s.events.length ? '' : 'Nenhum ciclo executado ainda.';
-  const values = s.events.filter(x=>!s.capitalUpgrade||Date.parse(x.at)>=Date.parse(s.capitalUpgrade.at)).map(x => x.equity);
-  const lo = Math.min(s.initialCapital, ...values) - .1, hi = Math.max(s.initialCapital, ...values) + .1;
-  $('line').setAttribute('d', values.map((v, i) => `${i ? 'L' : 'M'} ${10 + i * 780 / Math.max(1, values.length - 1)} ${150 - (v - lo) / (hi - lo) * 140}`).join(' '));
-  $('chart-note').textContent = values.length < 2 ? 'O gráfico aparece após dois registros.' : `De ${money(Math.min(...values))} a ${money(Math.max(...values))} · desde o último aporte · líquido dos custos simulados`;
+  renderChart(s);
+
 }
 async function update(action = 'status', body) {
   if (busy) return;
@@ -228,8 +232,9 @@ async function scanOpportunities() {
     for (const item of data.opportunities) {
       const card = document.createElement('article'), title = document.createElement('h3'), info = document.createElement('p'), button = document.createElement('button');
       title.textContent = `${catalogue.find(a => a.id === item.asset)?.symbol ?? item.asset} · ${item.action}`;
-      info.textContent = `${item.price?money(item.price):'Sem cotação'} · ${item.observedAt?`fonte às ${date(item.observedAt)}`:'fonte indisponível'}. ${item.reason}`;
+      info.textContent = `${item.price?money(item.price):'Sem cotação'} · ${item.observedAt?`fonte às ${date(item.observedAt)}`:'fonte indisponível'}`;
       card.append(title, info);
+      const why=document.createElement('details'),whyTitle=document.createElement('summary'),whyText=document.createElement('p');whyTitle.textContent='Ver decisão';whyText.textContent=item.reason;why.append(whyTitle,whyText);card.append(why);
       if (item.action !== 'AGUARDAR') { button.textContent = `Ver proposta de ${item.action === 'COMPRAR' ? 'compra' : 'venda'}`; button.addEventListener('click', () => previewOrder({ asset: item.asset, action: item.action })); card.append(button); }
       $('assist-opportunities').append(card);
     }
@@ -330,4 +335,23 @@ function renderFast(s){
  const stats=f?.stats;$('fast-stats').textContent=stats?`${stats.buys} compras · ${stats.sells} vendas · ${stats.wins} saídas positivas / ${stats.losses} negativas · resultado realizado ${money(stats.realizedPnl)} · taxas acumuladas ${money(stats.fees)}. Lucro líquido de trade inclui custos de entrada e saída; impostos de cripto não incluídos.`:'As primeiras entradas exigem cerca de 4–6 minutos de coleta nova e estabilização; esperar também é uma decisão registrada.';
  $('fast-holdings').replaceChildren();
  for(const [id,p] of Object.entries(f?.positions??{}))if(p.quantity>0){const net=p.quantity*p.lastPrice*.999*.999-p.costBasis;cells($('fast-holdings'),[catalogue.find(a=>a.id===id)?.symbol??id,`${p.quantity.toFixed(8)} · ${money(p.quantity*p.lastPrice)}`,`${money(net)} (${(net/p.costBasis*100).toFixed(2)}%)`,`+${blend[2]}%`,`-${blend[3]}%`]);}
+}
+
+function openCycle(at,events){
+ $('decisions-log').open=true;
+ const rows=[...$('events').children];for(const row of rows)row.classList.toggle('selected-cycle',row.dataset.cycle===at);
+ const selected=rows.find(row=>row.dataset.cycle===at);selected?.scrollIntoView({behavior:'smooth',block:'center'});
+ selected?.querySelector('summary')?.focus({preventScroll:true});
+ const cycle=events.filter(e=>e.at===at);$('chart-cycle').hidden=false;$('chart-cycle').textContent=`${date(at)} · ${cycle.map(e=>`${assetLabel(e.asset)} ${e.action}`).join(' · ')}. Decisões destacadas no diário; clique em Ver decisão para abrir o motivo.`;
+}
+function assetLabel(id){return catalogue.find(a=>a.id===id)?.symbol??discoveredAssets?.[id]?.symbol??(id??'Dados');}
+function renderChart(s){
+ const byTime=new Map();for(const e of s.events)if(Number.isFinite(e.equity)&&Number.isFinite(Date.parse(e.at))&&(!s.capitalUpgrade||Date.parse(e.at)>=Date.parse(s.capitalUpgrade.at)))byTime.set(e.at,e);
+ const events=[...byTime.values()].sort((a,b)=>Date.parse(a.at)-Date.parse(b.at)),values=events.map(e=>e.equity);
+ const lo=Math.min(s.initialCapital,...values)-.1,hi=Math.max(s.initialCapital,...values)+.1,start=events.length?Date.parse(events[0].at):0,end=events.length?Date.parse(events.at(-1).at):start;
+ const points=events.map(e=>({event:e,x:end===start?400:10+(Date.parse(e.at)-start)/(end-start)*780,y:150-(e.equity-lo)/(hi-lo)*140}));
+ $('line').setAttribute('d',points.map((p,i)=>`${i?'L':'M'} ${p.x} ${p.y}`).join(' '));$('chart-points').replaceChildren();
+ for(const p of points){const c=document.createElementNS('http://www.w3.org/2000/svg','circle'),title=document.createElementNS('http://www.w3.org/2000/svg','title');c.setAttribute('cx',p.x);c.setAttribute('cy',p.y);c.setAttribute('r','4');c.setAttribute('tabindex','0');c.setAttribute('role','button');c.setAttribute('aria-label',`${date(p.event.at)} · ${money(p.event.equity)} · abrir decisões`);title.textContent=c.getAttribute('aria-label');c.append(title);c.addEventListener('click',e=>{e.stopPropagation();openCycle(p.event.at,s.events);});c.addEventListener('keydown',e=>{if(['Enter',' '].includes(e.key)){e.preventDefault();openCycle(p.event.at,s.events);}});$('chart-points').append(c);}
+ $('chart').onclick=e=>{if(!points.length)return;const p=$('chart').createSVGPoint();p.x=e.clientX;p.y=e.clientY;const at=p.matrixTransform($('chart').getScreenCTM().inverse());const nearest=points.reduce((best,p)=>Math.abs(p.x-at.x)<Math.abs(best.x-at.x)?p:best);openCycle(nearest.event.at,s.events);};
+ $('chart-note').textContent=points.length?`De ${money(Math.min(...values))} a ${money(Math.max(...values))} · ${points.length} ciclos desde o último aporte · clique em um ponto para abrir aquele momento.`:'O gráfico aparece após o primeiro ciclo.';
 }
