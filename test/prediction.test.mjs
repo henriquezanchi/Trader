@@ -23,3 +23,8 @@ test('candle não concluído e moeda errada não viram história conhecida',()=>
  const list=points(),body={chart:{result:[{meta:{symbol:'BTC-BRL',currency:'BRL'},timestamp:[...list.map(p=>Date.parse(p.at)/1000-3600),now/1000],indicators:{quote:[{close:[...list.map(p=>p.price),999999]}]}}]}};
  const parsed=parseHourlyHistory(body,'bitcoin',now);assert.equal(parsed.length,400);assert.ok(parsed.every(p=>Date.parse(p.at)<=now));body.chart.result[0].meta.currency='USD';assert.throws(()=>parseHourlyHistory(body,'bitcoin',now));
 });
+
+test('histórico CoinGecko usa pontos reais por hora, sem interpolar ou aceitar futuro',async()=>{
+ const {parseCoinGeckoHistory,historicalDirection}=await import('../lib/forecast-history.mjs');const rows=points().map(p=>[Date.parse(p.at),p.price]);rows.push([now+3600000,999]);const parsed=parseCoinGeckoHistory({prices:rows},now);assert.equal(parsed.length,400);assert.ok(parsed.every(p=>Date.parse(p.at)<=now));
+ const fit=await historicalDirection('bitcoin',async()=>({ok:true,json:async()=>({prices:rows})}),now);assert.match(fit.report.source,/CoinGecko/);assert.ok(fit.report.metrics[1].samples>0);
+});
