@@ -47,7 +47,11 @@ export default async function handler(req, res) {
     }
     if (['opportunities', 'preview', 'confirm', 'research-refresh', 'capital-upgrade', 'markets'].includes(action)) {
       if (!state.config) return res.status(400).json({ error: 'Configure a carteira primeiro' });
-      if (action === 'research-refresh' && state.intelligence?.lastSlot >= new Date().toISOString().slice(0, 13)) return res.status(200).json({ state, version, limits: LIMITS, assets: ASSETS, profiles: PROFILES });
+      if (action === 'research-refresh' && state.intelligence?.lastSlot >= new Date().toISOString().slice(0, 13)) {
+        if(!state.performance)return res.status(200).json({state,version,limits:LIMITS,assets:ASSETS,profiles:PROFILES});
+        const next=await updatePerformance({...state,performance:{...state.performance,cdi:{...state.performance.cdi,attemptDate:null}}});
+        await repo.commit(version,next);return res.status(200).json({state:next,version:version+1,limits:LIMITS,assets:ASSETS,profiles:PROFILES});
+      }
       const quotes = await getQuotes(activeIds(state));
       if (action === 'opportunities') return res.status(200).json({ opportunities: opportunities(state, quotes), asOf: new Date().toISOString(), version });
       if (action === 'research-refresh') {
