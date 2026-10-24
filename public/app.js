@@ -110,7 +110,7 @@ function render(data) {
   const openReports=new Set([...$('events').children].filter(row=>row.querySelector('details')?.open).map(row=>row.dataset.eventId)),selectedCycle=[...$('events').children].find(row=>row.classList.contains('selected-cycle'))?.dataset.cycle;
   $('events').replaceChildren();
   for (const event of [...s.events].reverse()) {
-    const symbol = event.action==='APORTE'?'':catalogue.find(a => a.id === (event.asset ?? 'bitcoin'))?.symbol ?? '';
+    const symbol = event.action==='APORTE'?'':event.assetSymbol??assetLabel(event.asset??'bitcoin');
     const row=cells($('events'), [date(event.at), `${symbol} · ${event.action}${event.mode==='fast'?' · CURTO':event.mode==='assisted'?' · ASSISTIDO':event.mode==='core'?' · CENÁRIO':event.mode==='data'?' · DADOS':''}`, '', money(event.fee??0), money(event.equity)]);
     row.dataset.cycle=event.at;row.dataset.eventId=event.id??`${event.at}:${event.asset}:${event.action}`;if(event.at===selectedCycle)row.classList.add('selected-cycle');
     const detail=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Ver decisão';detail.append(summary);
@@ -251,7 +251,7 @@ async function previewOrder(order) {
   assistBusy = true; clearProposal();
   try {
     const { proposal: p } = await request(order.book==='fast'?'fast-preview':'preview', order); currentProposal = {...p,confirmAction:order.book==='fast'?'fast-confirm':'confirm'};
-    $('proposal-title').textContent = `${p.action === 'COMPRAR' ? 'Comprar' : 'Vender'} ${catalogue.find(a => a.id === p.asset)?.symbol ?? p.asset} · somente simulação`;
+    $('proposal-title').textContent = `${p.action === 'COMPRAR' ? 'Comprar' : 'Vender'} ${assetLabel(p.asset)} · somente simulação`;
     $('proposal-summary').textContent = `${p.quantity.toFixed(8)} unidades · preço de execução estimado ${money(p.executionPrice)} · taxa ${money(p.fee)} · ${p.action === 'COMPRAR' ? 'débito' : 'crédito'} ${money(Math.abs(p.amount))}.${p.costs?.lot===1?' Cotas inteiras; emolumentos de 0,03% e deslizamento de 0,05%, corretagem assumida zero.':''}${p.estimatedTax?` Reserva tributária estimada: ${money(p.estimatedTax)}.`:''}${p.settlement?` Crédito disponível em ${p.settlement} (D+2).`:''}`;
     $('proposal-impact').textContent = `Saldo após operação: ${money(p.after.cash)}. Patrimônio marcado ao preço atual: ${money(p.after.equity)} (impacto inicial ${money(p.after.equity - p.before.equity)}).${p.realizedPnl != null ? ` Resultado realizado estimado da posição: ${money(p.realizedPnl)}.` : ''}`;
     $('proposal-scenarios').replaceChildren();
@@ -349,7 +349,7 @@ function openCycle(at,events){
  selected?.querySelector('summary')?.focus({preventScroll:true});
  const cycle=events.filter(e=>e.at===at);$('chart-cycle').hidden=false;$('chart-cycle').textContent=`${date(at)} · ${cycle.map(e=>`${assetLabel(e.asset)} ${e.action}`).join(' · ')}. Decisões destacadas no diário; clique em Ver decisão para abrir o motivo.`;
 }
-function assetLabel(id){return catalogue.find(a=>a.id===id)?.symbol??discoveredAssets?.[id]?.symbol??(id??'Dados');}
+function assetLabel(id){return catalogue.find(a=>a.id===id)?.symbol??discoveredAssets?.[id]?.symbol??currentViewState?.fast?.positions[id]?.symbol??(id??'Dados');}
 function renderChart(s){
  const byTime=new Map();for(const e of s.events)if(Number.isFinite(e.equity)&&Number.isFinite(Date.parse(e.at))&&(!s.capitalUpgrade||Date.parse(e.at)>=Date.parse(s.capitalUpgrade.at)))byTime.set(e.at,e);
  const events=[...byTime.values()].sort((a,b)=>Date.parse(a.at)-Date.parse(b.at)),values=events.map(e=>e.equity);
