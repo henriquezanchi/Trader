@@ -41,4 +41,11 @@ returns jsonb language sql security definer set search_path = '' as $$
 $$;
 revoke all on function public.trade_lab_quality_read() from public, anon, authenticated;
 grant execute on function public.trade_lab_quality_read() to service_role;
+create function public.trade_lab_training_data_read(asset_id text)
+returns jsonb language sql security definer set search_path = '' as $$
+ select c.data->'historyTraining' from trade_lab.research_cycles c
+ where c.data#>>'{historyTraining,report,asset}'=asset_id order by c.id desc limit 1;
+$$;
+revoke all on function public.trade_lab_training_data_read(text) from public,anon,authenticated;
+grant execute on function public.trade_lab_training_data_read(text) to service_role;
 commit;

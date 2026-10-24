@@ -1,5 +1,5 @@
 import { auditForecast, PREDICTION_PROTOCOL } from '../lib/prediction-protocol.mjs';
-import { historicalDirection, commitHistoricalDirection } from '../lib/forecast-history.mjs';
+import { historicalDirection, commitHistoricalDirection, fitHistoricalDirection, rememberHistoryBackoff } from '../lib/forecast-history.mjs';
 import { fastSalePreview, fastSaleConfirm, scheduleSale } from '../lib/fast-control.mjs';
 import { upgradeCapital, updatePerformance } from '../lib/performance.mjs';
 import { getETFs, ETF_IDS } from '../lib/markets.mjs';
@@ -46,7 +46,14 @@ export default async function handler(req, res) {
     }
     if(action==='history-train'){
       const body=await readBody(req);let trained;
-      try{trained=await historicalDirection(body.asset);}catch(error){return res.status(503).json({error:error.message});}
+      try{
+        const cached=await repo.trainingData(body.asset),current=await repo.read();
+        if(cached?.observations?.length>=120&&Date.now()-Date.parse(cached.report?.importedAt)<24*3600000){trained=fitHistoricalDirection(cached.observations,body.asset);trained.report.source=cached.report.source;trained.report.dataFetchedAt=cached.report.dataFetchedAt??cached.report.importedAt;trained.report.reusedDataset=true;}
+        else trained=await historicalDirection(body.asset,fetch,Date.now(),current.state.historySourcePolicy??current.state.intelligence?.historySourcePolicy);
+      }catch(error){
+        if(error.coinGeckoNotBefore){await rememberHistoryBackoff(repo,error.coinGeckoNotBefore);res.setHeader('Retry-After',String(Math.max(1,Math.ceil((Date.parse(error.coinGeckoNotBefore)-Date.now())/1000))));}
+        return res.status(error.coinGeckoNotBefore?429:503).json({error:error.message});
+      }
       const result=await commitHistoricalDirection(repo,trained);
       return res.status(200).json({...result,assets:ASSETS,profiles:PROFILES,limits:LIMITS});
     }

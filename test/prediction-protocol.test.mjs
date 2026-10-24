@@ -60,3 +60,13 @@ test('hash canônico resiste à reordenação JSONB e replay detecta adulteraç�
 test('histórico impreciso não usa ponto anterior ao alvo como resultado',()=>{
  const data=history().map((p,i)=>({...p,at:new Date(Date.parse(p.at)+(i%2?60000:0)).toISOString()}));const result=fitHistoricalDirection(data,'bitcoin',now+60000);assert.ok(result.report.protocolMetrics[1].missing>0);assert.ok(result.report.protocolMetrics[1].coverage<1);for(const fold of result.report.walkForward[1])assert.ok(fold.trainThrough<fold.testFrom);
 });
+
+test('importação respeita pausa do provedor e usa fonte alternativa identificada',async()=>{
+ const {historicalDirection}=await import('../lib/forecast-history.mjs');const requested=[];const data={Response:'Success',Data:{Data:history().map(p=>({time:Date.parse(p.at)/1000-3600,close:p.price}))}};
+ const result=await historicalDirection('bitcoin',async url=>{requested.push(url);return {ok:true,json:async()=>data};},now,{coinGeckoNotBefore:new Date(now+120000).toISOString()});assert.ok(requested.every(url=>!url.includes('coingecko')));assert.match(result.report.source,/CryptoCompare/);assert.ok(result.report.coinGeckoNotBefore);
+});
+
+test('Retry-After em data HTTP é respeitado, mesmo com sucesso na fonte alternativa',async()=>{
+ const {historicalDirection}=await import('../lib/forecast-history.mjs');const retry=new Date(now+300000).toUTCString(),data={Response:'Success',Data:{Data:history().map(p=>({time:Date.parse(p.at)/1000-3600,close:p.price}))}};
+ const result=await historicalDirection('bitcoin',async url=>url.includes('coingecko')?{ok:false,status:429,headers:{get:()=>retry}}:{ok:true,json:async()=>data},now);assert.equal(Date.parse(result.report.coinGeckoNotBefore),now+300000);
+});
