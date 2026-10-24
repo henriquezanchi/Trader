@@ -286,7 +286,7 @@ function renderIntelligence(s) {
   $('intelligence-status').textContent = s.researchError?.message ?? (r ? `Pesquisa atualizada em ${date(r.updatedAt)}. Modelo de 6h: ${r.metrics?.[6]?.trained??0}/100 resultados para liberar entradas na carteira experimental. Sem troca automática do motor principal.` : 'A pesquisa começará no próximo ciclo; você também pode atualizar agora.');
   if (!r) { $('news-sources').textContent = 'Fontes ainda não consultadas.'; return; }
   for (const h of [1, 6, 24]) {
-    const m = r.metrics[h], card = document.createElement('article'), title = document.createElement('h3'), p = document.createElement('p');
+    const m = r.metrics?.[h]??{scored:0,missed:0,accuracy:null,brier:null}, card = document.createElement('article'), title = document.createElement('h3'), p = document.createElement('p');
     title.textContent = `Horizonte ${h}h`; p.textContent = `${m.scored} resultados avaliados · ${m.missed} sem preço adequado · acerto ${m.accuracy == null ? 'sem dados' : `${(m.accuracy * 100).toFixed(1)}%`} · Brier ${m.brier == null ? 'sem dados' : m.brier.toFixed(3)} (menor é melhor).`; card.append(title, p); $('model-metrics').append(card);
   }
   for (const row of latest?.experiment?.summaries ?? []) cells($('shadow-results'), [{ baseline: 'Referência MA 6/24', 'rsi-confirmed': 'Tendência + RSI', learned: 'Modelo aprendido', 'dca-weekly':'DCA semanal BTC · teto 5%', 'rsi-recovery':'Recuperação RSI' }[row.id], `${row.returnPct.toFixed(2)}%`, `${row.maxDrawdownPct.toFixed(2)}%`, String(row.trades), row.status === 'learning' ? 'Aprendendo, sem entradas' : row.paused ? 'Pausada por limite' : 'Somente pesquisa']);
