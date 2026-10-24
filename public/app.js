@@ -39,6 +39,7 @@ function cells(parent, texts) {
 }
 function fillSettings(c) {
   $('profile').value = c.profile;
+  $('crypto-strategy').value=c.cryptoStrategy??'trend';
   for (const key of fields) $(key).value = c[key];
   for (const a of catalogue) $(`weight-${a.id}`).value = c.allocations[a.id] ?? 0;
   mixSummary();
@@ -59,12 +60,13 @@ function render(data) {
   $('dashboard').hidden = false; $('audit-panel').hidden = false; $('login').hidden = true;
   if (currentProposal && currentProposal.version !== data.version) { clearProposal(); $('assist-status').textContent = 'A carteira mudou; solicite uma nova proposta.'; }
   renderIntelligence(s);
+  renderPerformance(s);
   const activeAssets = [...new Set([...Object.keys(s.config?.allocations ?? {}), ...Object.keys(s.portfolio ?? {}).filter(id => s.portfolio[id].quantity > 0)])];
   const chosen = $('assist-asset').value; $('assist-asset').replaceChildren();
   for (const id of activeAssets) { const o = document.createElement('option'); o.value = id; o.textContent = catalogue.find(a => a.id === id)?.symbol ?? id; $('assist-asset').append(o); }
   if (activeAssets.includes(chosen)) $('assist-asset').value = chosen;
   const holdings = s.portfolio ?? { bitcoin: { quantity: s.btc, lastPrice: s.lastPrice, observations: s.observations } };
-  const exposure = Object.values(holdings).reduce((v, p) => v + p.quantity * (p.lastPrice ?? 0), 0), total = s.cash + exposure;
+  const exposure = Object.values(holdings).reduce((v, p) => v + p.quantity * (p.lastPrice ?? 0), 0), total = s.cash + exposure + (s.unsettled??[]).reduce((v,x)=>v+x.amount,0);
   $('equity').textContent = money(total); $('cash').textContent = money(s.cash);
   $('result').textContent = `${money(total - s.initialCapital)} desde o início`;
   $('exposure').textContent = money(exposure);
@@ -75,11 +77,11 @@ function render(data) {
   $('status').textContent = paused ? 'Pausado' : s.startedAt ? 'Habilitado para ciclos' : 'Simulação habilitada';
   $('pause').textContent = paused ? 'Iniciar / retomar' : 'Pausar';
   $('reason').textContent = s.reason;
-  $('warmup').textContent = 'Cada ativo precisa de 24 observações horárias consecutivas. O botão iniciar habilita o motor; fechar esta aba não configura o agendador. Acompanhe a última execução.';
+  $('warmup').textContent = 'Cripto usa observações horárias; ETFs usam 24 pregões concluídos, obtidos da fonte. DCA semanal não exige janela técnica. O botão iniciar habilita o motor; fechar esta aba não configura o agendador. Acompanhe a última execução.';
   $('settings-fields').disabled = false;
   $('save-settings').disabled = !paused || busy;
   $('pause-settings').hidden = paused;
-  $('bootstrap').hidden = !s.config || Boolean(s.bootstrap) || Object.values(holdings).some(p => p.quantity > 0);
+  $('bootstrap').hidden = Object.keys(s.config?.allocations??{}).some(id=>catalogue.find(a=>a.id===id)?.market==='b3') || !s.config || Boolean(s.bootstrap) || Object.values(holdings).some(p => p.quantity > 0);
   $('bootstrap').disabled = paused || busy;
   $('config-state').textContent = s.config ? `Perfil base: ${profiles[s.config.profile].label} · ajustes personalizados` : 'Motor original BTC; escolha um perfil para preparar sua carteira';
   $('config-note').textContent = paused ? 'Edite os parâmetros e salve antes de iniciar. Ativos com posição aberta só podem ser removidos após a saída pelo motor.' : 'Você pode explorar e ajustar os perfis. Para aplicar as mudanças, clique em Pausar para salvar e depois em Salvar carteira e limites.';
@@ -87,7 +89,7 @@ function render(data) {
   $('holdings').replaceChildren();
   for (const a of catalogue) {
     const p = holdings[a.id];
-    cells($('holdings'), [a.symbol, a.risk, a.potential, s.config ? `${s.config.allocations[a.id] ?? 0}%` : a.id === 'bitcoin' ? 'Legado' : 'Não selecionado', p ? `${p.quantity.toFixed(8)} · ${money(p.quantity * (p.lastPrice ?? 0))}` : '—', p?.lastPrice ? money(p.lastPrice) : 'Sem cotação', `${sequenceLength(p?.observations ?? [])}/24 consecutivas · ${p?.observations?.length ?? 0} mantidas`]);
+    cells($('holdings'), [a.symbol, a.risk, a.potential, s.config ? `${s.config.allocations[a.id] ?? 0}%` : a.id === 'bitcoin' ? 'Legado' : 'Não selecionado', p ? `${p.quantity.toFixed(8)} · ${money(p.quantity * (p.lastPrice ?? 0))}` : '—', p?.lastPrice ? money(p.lastPrice) : 'Sem cotação', a.market==='b3'?`${p?.dailyHistory?.length??0} pregões na fonte · cotas inteiras`:`${sequenceLength(p?.observations ?? [])}/24 consecutivas · ${p?.observations?.length ?? 0} mantidas`]);
   }
   const cutoff = Date.now() - 24 * 3600000;
   const recentEvents = s.events.filter(e => Date.parse(e.at) >= cutoff);
@@ -95,19 +97,19 @@ function render(data) {
   const selected = s.config ? Object.keys(s.config.allocations) : ['bitcoin'];
   const cycles = new Set([...recentEvents.map(e => e.at), ...selected.flatMap(id => (holdings[id]?.observations ?? []).filter(o => !o.historical && Date.parse(o.at) >= cutoff).map(o => o.at))]);
   const historicalSamples = selected.reduce((n, id) => n + (holdings[id]?.observations ?? []).filter(o => o.historical).length, 0);
-  const warming = selected.some(id => sequenceLength(holdings[id]?.observations ?? []) < 24);
+  const warming = s.config?.cryptoStrategy!=='dca-weekly' && selected.filter(id=>catalogue.find(a=>a.id===id)?.market!=='b3').some(id => sequenceLength(holdings[id]?.observations ?? []) < 24);
   $('activity-summary').textContent = `${cycles.size} ciclos ao vivo registrados · ${historicalSamples} amostras históricas para indicadores · ${trades} compras ou vendas simuladas · ${recentEvents.filter(e => e.action === 'AGUARDAR').length} decisões de aguardar.`;
-  $('activity-reason').textContent = trades ? 'Veja as decisões e seus motivos no diário abaixo.' : warming ? 'Sem negociações: a sequência de 24 observações horárias ainda não está completa. Intervalos maiores que 90 minutos interrompem a sequência. Sem posições, o caixa virtual não rende.' : s.paused ? 'A simulação está pausada. Veja os motivos no diário abaixo.' : 'A janela de dados está completa; o motor aguarda um sinal e respeita os limites configurados.';
+  $('activity-reason').textContent = trades ? 'Veja as decisões e seus motivos no diário abaixo. Taxas e deslizamento contam no resultado e nos limites de perda.' : warming ? 'Sem negociações: a sequência de 24 observações horárias ainda não está completa. Intervalos maiores que 90 minutos interrompem a sequência. Sem posições, o caixa virtual não rende.' : s.paused ? 'A simulação está pausada. Veja os motivos no diário abaixo.' : s.config?.cryptoStrategy==='dca-weekly' ? 'DCA semanal: o ciclo verifica a data do próximo aporte e o teto de 5% em BTC; não é uma estratégia de trade diário.' : 'A janela de dados está completa; o motor aguarda um sinal e respeita os limites configurados.';
   $('events').replaceChildren();
   for (const event of [...s.events].reverse()) {
-    const symbol = catalogue.find(a => a.id === (event.asset ?? 'bitcoin'))?.symbol ?? '';
-    cells($('events'), [date(event.at), `${symbol} · ${event.action}`, event.reason, money(event.fee), money(event.equity)]);
+    const symbol = event.action==='APORTE'?'':catalogue.find(a => a.id === (event.asset ?? 'bitcoin'))?.symbol ?? '';
+    cells($('events'), [date(event.at), `${symbol} · ${event.action}`, event.reason, money(event.fee??0), money(event.equity)]);
   }
   $('empty').textContent = s.events.length ? '' : 'Nenhum ciclo executado ainda.';
-  const values = s.events.map(x => x.equity);
+  const values = s.events.filter(x=>!s.capitalUpgrade||Date.parse(x.at)>=Date.parse(s.capitalUpgrade.at)).map(x => x.equity);
   const lo = Math.min(s.initialCapital, ...values) - .1, hi = Math.max(s.initialCapital, ...values) + .1;
   $('line').setAttribute('d', values.map((v, i) => `${i ? 'L' : 'M'} ${10 + i * 780 / Math.max(1, values.length - 1)} ${150 - (v - lo) / (hi - lo) * 140}`).join(' '));
-  $('chart-note').textContent = values.length < 2 ? 'O gráfico aparece após dois registros.' : `De ${money(Math.min(...values))} a ${money(Math.max(...values))} · líquido das taxas simuladas`;
+  $('chart-note').textContent = values.length < 2 ? 'O gráfico aparece após dois registros.' : `De ${money(Math.min(...values))} a ${money(Math.max(...values))} · desde o último aporte · líquido dos custos simulados`;
 }
 async function update(action = 'status', body) {
   if (busy) return;
@@ -123,11 +125,11 @@ async function update(action = 'status', body) {
   finally { busy = false; document.querySelectorAll('button').forEach(b => b.disabled = false); $('save-settings').disabled = !paused; $('bootstrap').disabled = paused; syncProposalButton(); }
 }
 $('settings').addEventListener('input', () => { dirty = true; mixSummary(); });
-$('profile').addEventListener('change', () => { const profile = $('profile').value; fillSettings({ ...profiles[profile], profile }); dirty = true; });
+$('profile').addEventListener('change', () => { const profile = $('profile').value; fillSettings({ ...profiles[profile], profile, cryptoStrategy:$('crypto-strategy').value }); dirty = true; });
 $('settings').addEventListener('submit', event => {
   event.preventDefault();
   if (!paused) { $('message').textContent = 'Pause a simulação antes de salvar a carteira.'; return; }
-  const config = { profile: $('profile').value, allocations: {} };
+  const config = { profile: $('profile').value, cryptoStrategy:$('crypto-strategy').value, allocations: {} };
   for (const key of fields) config[key] = Number($(key).value);
   for (const a of catalogue) { const value = Number($(`weight-${a.id}`).value); if (value) config.allocations[a.id] = value; }
   update('configure', { config, expectedVersion: version });
@@ -223,7 +225,7 @@ async function scanOpportunities() {
     for (const item of data.opportunities) {
       const card = document.createElement('article'), title = document.createElement('h3'), info = document.createElement('p'), button = document.createElement('button');
       title.textContent = `${catalogue.find(a => a.id === item.asset)?.symbol ?? item.asset} · ${item.action}`;
-      info.textContent = `${money(item.price)} · fonte às ${date(item.observedAt)}. ${item.reason}`;
+      info.textContent = `${item.price?money(item.price):'Sem cotação'} · ${item.observedAt?`fonte às ${date(item.observedAt)}`:'fonte indisponível'}. ${item.reason}`;
       card.append(title, info);
       if (item.action !== 'AGUARDAR') { button.textContent = `Ver proposta de ${item.action === 'COMPRAR' ? 'compra' : 'venda'}`; button.addEventListener('click', () => previewOrder({ asset: item.asset, action: item.action })); card.append(button); }
       $('assist-opportunities').append(card);
@@ -238,7 +240,7 @@ async function previewOrder(order) {
   try {
     const { proposal: p } = await request('preview', order); currentProposal = p;
     $('proposal-title').textContent = `${p.action === 'COMPRAR' ? 'Comprar' : 'Vender'} ${catalogue.find(a => a.id === p.asset)?.symbol ?? p.asset} · somente simulação`;
-    $('proposal-summary').textContent = `${p.quantity.toFixed(8)} unidades · preço de execução estimado ${money(p.executionPrice)} · taxa ${money(p.fee)} · ${p.action === 'COMPRAR' ? 'débito' : 'crédito'} ${money(Math.abs(p.amount))}.`;
+    $('proposal-summary').textContent = `${p.quantity.toFixed(8)} unidades · preço de execução estimado ${money(p.executionPrice)} · taxa ${money(p.fee)} · ${p.action === 'COMPRAR' ? 'débito' : 'crédito'} ${money(Math.abs(p.amount))}.${p.costs?.lot===1?' Cotas inteiras; emolumentos de 0,03% e deslizamento de 0,05%, corretagem assumida zero.':''}${p.estimatedTax?` Reserva tributária estimada: ${money(p.estimatedTax)}.`:''}${p.settlement?` Crédito disponível em ${p.settlement} (D+2).`:''}`;
     $('proposal-impact').textContent = `Saldo após operação: ${money(p.after.cash)}. Patrimônio marcado ao preço atual: ${money(p.after.equity)} (impacto inicial ${money(p.after.equity - p.before.equity)}).${p.realizedPnl != null ? ` Resultado realizado estimado da posição: ${money(p.realizedPnl)}.` : ''}`;
     $('proposal-scenarios').replaceChildren();
     for (const row of p.scenarios) cells($('proposal-scenarios'), [`${row.changePct > 0 ? '+' : ''}${row.changePct}%`, money(row.equityAfterExit), money(row.differenceVsBefore)]);
@@ -275,7 +277,7 @@ function renderIntelligence(s) {
     const m = r.metrics[h], card = document.createElement('article'), title = document.createElement('h3'), p = document.createElement('p');
     title.textContent = `Horizonte ${h}h`; p.textContent = `${m.scored} resultados avaliados · ${m.missed} sem preço adequado · acerto ${m.accuracy == null ? 'sem dados' : `${(m.accuracy * 100).toFixed(1)}%`} · Brier ${m.brier == null ? 'sem dados' : m.brier.toFixed(3)} (menor é melhor).`; card.append(title, p); $('model-metrics').append(card);
   }
-  for (const row of latest?.experiment?.summaries ?? []) cells($('shadow-results'), [{ baseline: 'Referência MA 6/24', 'rsi-confirmed': 'Tendência + RSI', learned: 'Modelo aprendido' }[row.id], `${row.returnPct.toFixed(2)}%`, `${row.maxDrawdownPct.toFixed(2)}%`, String(row.trades), row.status === 'learning' ? 'Aprendendo, sem entradas' : row.paused ? 'Pausada por limite' : 'Somente pesquisa']);
+  for (const row of latest?.experiment?.summaries ?? []) cells($('shadow-results'), [{ baseline: 'Referência MA 6/24', 'rsi-confirmed': 'Tendência + RSI', learned: 'Modelo aprendido', 'dca-weekly':'DCA semanal BTC · teto 5%', 'rsi-recovery':'Recuperação RSI' }[row.id], `${row.returnPct.toFixed(2)}%`, `${row.maxDrawdownPct.toFixed(2)}%`, String(row.trades), row.status === 'learning' ? 'Aprendendo, sem entradas' : row.paused ? 'Pausada por limite' : 'Somente pesquisa']);
   const benchmark = latest?.experiment?.benchmark;
   if (benchmark) cells($('shadow-results'), ['Comprar e manter o mix', `${benchmark.returnPct.toFixed(2)}%`, 'Não calculado', 'Compra inicial', 'Benchmark sem stops']);
   $('news-sources').textContent = (r.news?.sources ?? []).map(source => `${source.source}: ${source.status}`).join(' · ');
@@ -304,3 +306,14 @@ async function loadResearch(before = null) {
 $('research-log').addEventListener('click', () => loadResearch());
 $('research-more').addEventListener('click', () => loadResearch(researchCursor));
 restoreSession();
+
+function renderPerformance(s) {
+  $('capital-upgrade').hidden=Boolean(s.capitalUpgrade)||s.initialCapital>=1000;
+  $('capital-note').textContent=s.capitalUpgrade?`Capital contribuído: ${money(s.initialCapital)}. Aporte virtual de ${money(s.capitalUpgrade.amount)} em ${date(s.capitalUpgrade.at)}. Resultado anterior preservado: ${money(s.capitalUpgrade.resultBefore)}. Aporte não conta como lucro.`:`Capital contribuído: ${money(s.initialCapital)}. Elevar o capital adiciona somente a diferença em caixa virtual e preserva posições e resultado.`;
+  const p=s.performance;$('performance-metrics').replaceChildren();
+  if(p){for(const [label,value] of [['Resultado após custos',money(p.netPnl??0)],['Referência CDI bruto',p.cdi.through?money(p.cdi.equity):'Aguardando dias publicados'],['Maior queda desde o aporte',`${p.maxDrawdownPct.toFixed(2)}%`],['Tempo de observação',`${p.elapsedDays?.toFixed(1)??'0'} dias`]]){const box=document.createElement('article'),title=document.createElement('h3'),text=document.createElement('p');title.textContent=label;text.textContent=value;box.append(title,text);$('performance-metrics').append(box);}
+  $('performance-note').textContent=`${p.conclusion??'Aguardando observações'}. CDI: ${p.cdi.status??'aguardando fonte'}${p.cdi.through?`, taxas consideradas até ${p.cdi.through}`:': nenhuma rentabilidade projetada'}. Comparação desde ${date(p.startedAt)}. Taxas dos fundos já integram o preço; impostos de cripto, spreads reais e qualidade da execução podem diferir.`;
+  }else $('performance-note').textContent='A comparação começará com o aporte virtual, sem inventar rentabilidade passada.';
+  const pending=(s.unsettled??[]).reduce((v,x)=>v+x.amount,0);$('settlement-note').textContent=pending?`${money(pending)} em liquidação D+2: incluído no patrimônio e indisponível para novas compras.`:'Nenhum valor em liquidação.';
+}
+$('capital-upgrade').addEventListener('click',()=>update('capital-upgrade'));

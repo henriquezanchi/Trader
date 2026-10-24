@@ -31,7 +31,7 @@ test('sugestões explicam saída por tendência, espera e pausa sem negociar',()
  s.portfolio.bitcoin.quantity=.1;s.cash-=10;
  s.portfolio.bitcoin.observations.forEach((o,i)=>o.price=125-i);
  const original=structuredClone(s),items=opportunities(s,q,now);
- assert.equal(items.find(i=>i.asset==='bitcoin').action,'VENDER');assert.match(items.find(i=>i.asset==='bitcoin').reason,/Média de 6h/);
+ assert.equal(items.find(i=>i.asset==='bitcoin').action,'VENDER');assert.match(items.find(i=>i.asset==='bitcoin').reason,/Média de 6 períodos/);
  assert.equal(items.find(i=>i.asset==='ethereum').action,'AGUARDAR');assert.match(items.find(i=>i.asset==='ethereum').reason,/RSI/);assert.deepEqual(s,original);
  s.paused=true;assert.match(opportunities(s,q,now).find(i=>i.asset==='ethereum').reason,/pausada/);
 });
