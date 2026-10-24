@@ -1,3 +1,4 @@
+import { auditForecast, PREDICTION_PROTOCOL } from '../lib/prediction-protocol.mjs';
 import { historicalDirection, commitHistoricalDirection } from '../lib/forecast-history.mjs';
 import { fastSalePreview, fastSaleConfirm, scheduleSale } from '../lib/fast-control.mjs';
 import { upgradeCapital, updatePerformance } from '../lib/performance.mjs';
@@ -23,12 +24,16 @@ export default async function handler(req, res) {
     catch (error) { return res.status(error.status ?? 503).json({ error: error.status ? error.message : 'Serviço de acesso indisponível' }); }
     if (req.method !== 'GET' && !sameOrigin(req)) return res.status(403).json({ error: 'Origem da solicitação inválida' });
   }
-  if (!['status', 'tick', 'pause', 'resume', 'configure', 'audit', 'bootstrap', 'opportunities', 'preview', 'confirm', 'research', 'research-refresh', 'capital-upgrade', 'markets', 'fast-preview', 'fast-confirm', 'schedule-sale', 'history-train'].includes(action)) return res.status(400).json({ error: 'Ação desconhecida' });
-  if (req.method !== (['status', 'audit', 'opportunities', 'research', 'markets'].includes(action) ? 'GET' : 'POST')) return res.status(405).json({ error: 'Método não permitido' });
+  if (!['status', 'tick', 'pause', 'resume', 'configure', 'audit', 'bootstrap', 'opportunities', 'preview', 'confirm', 'research', 'research-refresh', 'capital-upgrade', 'markets', 'fast-preview', 'fast-confirm', 'schedule-sale', 'history-train', 'quality'].includes(action)) return res.status(400).json({ error: 'Ação desconhecida' });
+  if (req.method !== (['status', 'audit', 'opportunities', 'research', 'markets', 'quality'].includes(action) ? 'GET' : 'POST')) return res.status(405).json({ error: 'Método não permitido' });
   try {
     const repo = repository();
     const commit = repo.commit;
     repo.commit = (version, state) => commit(version, { ...state, lastMutation: { actor: scheduler ? 'scheduler' : 'user', userId, action, at: new Date().toISOString() } });
+    if(action==='quality'){
+      const report=await repo.quality(),{state}=await repo.read(),pending=state.intelligence?.directionPending??[],checked=pending.filter(p=>p.protocolId===PREDICTION_PROTOCOL.id).map(auditForecast);
+      return res.status(200).json({...report,replay:{protocol:PREDICTION_PROTOCOL.id,checked:checked.length,valid:checked.filter(p=>p.valid).length,invalid:checked.filter(p=>!p.valid),legacyUnfingerprinted:pending.length-checked.length}});
+    }
     if (action === 'audit' || action === 'research') {
       const raw = new URL(req.url, 'https://local.invalid').searchParams.get('before');
       if (raw !== null && !/^[1-9][0-9]{0,14}$/.test(raw)) return res.status(400).json({ error: 'Página inválida' });
