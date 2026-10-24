@@ -1,9 +1,9 @@
-let discoveredAssets = {};
+let discoveredAssets = {},currentViewState=null;
 let connected = false, paused = false, version = null, catalogue = [], profiles = {}, dirty = false, busy = false;
 const $ = id => document.getElementById(id);
 const money = value => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 const date = value => new Date(value).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-const fields = ['exposurePct', 'orderPct', 'dailyLossPct', 'totalLossPct', 'targetPct', 'days'];
+const fields = ['exposurePct', 'orderPct', 'dailyLossPct', 'totalLossPct', 'targetPct', 'days', 'discoveryPct'];
 async function authCall(action, body) {
   const response = await fetch(`/api/auth?action=${action}`, { method: action === 'session' ? 'GET' : 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, ...(action === 'session' ? {} : { body: JSON.stringify(body ?? {}) }), cache: 'no-store', signal: AbortSignal.timeout(15000) });
   const data = await response.json();
@@ -42,7 +42,7 @@ function cells(parent, texts) {
 function fillSettings(c) {
   $('profile').value = c.profile;
   $('crypto-strategy').value=c.cryptoStrategy??'trend';
-  for (const key of fields) $(key).value = c[key];
+  for (const key of fields) $(key).value = key==='discoveryPct'?(c.discoveryPct??(c.profile.includes('agressivo')?15:c.profile.includes('conservador')?0:5)):c[key];
   for (const a of catalogue) $(`weight-${a.id}`).value = c.allocations[a.id] ?? 0;
   mixSummary();
 }
@@ -51,7 +51,7 @@ function mixSummary() {
   $('mix-summary').textContent = `Pesos: ${sum.toFixed(1)}% · reserva mínima planejada: ${(100 - sum).toFixed(1)}% · limites em % do capital virtual inicial`;
 }
 function render(data) {
-  const s = data.state; discoveredAssets=s.discovery?.assets??{}; version = data.version; connected = true; $('reset-panel').hidden = true;
+  const s = data.state; discoveredAssets=s.discovery?.assets??{};currentViewState=s; version = data.version; connected = true; $('reset-panel').hidden = true;
   if (!catalogue.length) {
     catalogue = data.assets; profiles = data.profiles;
     for (const a of catalogue) {
@@ -64,6 +64,8 @@ function render(data) {
   renderIntelligence(s);
   renderPerformance(s);
   renderFast(s);
+  renderPredictions(s);
+  renderLearning(s);
   const activeAssets = [...new Set([...Object.keys(s.config?.allocations ?? {}), ...Object.keys(s.portfolio ?? {}).filter(id => s.portfolio[id].quantity > 0)])];
   const chosen = $('assist-asset').value; $('assist-asset').replaceChildren();
   for (const id of activeAssets) { const o = document.createElement('option'); o.value = id; o.textContent = catalogue.find(a => a.id === id)?.symbol ?? id; $('assist-asset').append(o); }
@@ -100,19 +102,20 @@ function render(data) {
   const selected = s.config ? Object.keys(s.config.allocations) : ['bitcoin'];
   const cycles = new Set([...recentEvents.map(e => e.at), ...selected.flatMap(id => (holdings[id]?.observations ?? []).filter(o => !o.historical && Date.parse(o.at) >= cutoff).map(o => o.at))]);
   const historicalSamples = selected.reduce((n, id) => n + (holdings[id]?.observations ?? []).filter(o => o.historical).length, 0);
-  const warming = s.config?.cryptoStrategy!=='dca-weekly' && selected.filter(id=>catalogue.find(a=>a.id===id)?.market!=='b3').some(id => sequenceLength(holdings[id]?.observations ?? []) < 24);
+  const warming = !['dca-weekly','active'].includes(s.config?.cryptoStrategy) && selected.filter(id=>catalogue.find(a=>a.id===id)?.market!=='b3').some(id => sequenceLength(holdings[id]?.observations ?? []) < 24);
   $('activity-summary').textContent = `${cycles.size} ciclos ao vivo registrados · ${historicalSamples} amostras históricas para indicadores · ${trades} compras ou vendas simuladas · ${recentEvents.filter(e => e.action === 'AGUARDAR').length} decisões de aguardar.`;
   $('activity-reason').textContent = trades ? 'Veja as decisões e seus motivos no diário abaixo. Taxas e deslizamento contam no resultado e nos limites de perda.' : warming ? 'Sem negociações: a sequência de 24 observações horárias ainda não está completa. Intervalos maiores que 90 minutos interrompem a sequência. Sem posições, o caixa virtual não rende.' : s.paused ? 'A simulação está pausada. Veja os motivos no diário abaixo.' : s.config?.cryptoStrategy==='dca-weekly' ? 'DCA semanal: o ciclo verifica a data do próximo aporte e o teto de 5% em BTC; não é uma estratégia de trade diário.' : 'A janela de dados está completa; o motor aguarda um sinal e respeita os limites configurados.';
   const latestEvent=s.events.at(-1), latestCycle=latestEvent?s.events.filter(e=>e.at===latestEvent.at):[];
   $('diary-latest').textContent=latestEvent?`Último ciclo ${date(latestEvent.at)} · ${latestCycle.length} decisões · mais recente: ${catalogue.find(a=>a.id===latestEvent.asset)?.symbol??'Dados'} ${latestEvent.action}`:'Aguardando primeiro ciclo.';
+  const openReports=new Set([...$('events').children].filter(row=>row.querySelector('details')?.open).map(row=>row.dataset.eventId)),selectedCycle=[...$('events').children].find(row=>row.classList.contains('selected-cycle'))?.dataset.cycle;
   $('events').replaceChildren();
   for (const event of [...s.events].reverse()) {
     const symbol = event.action==='APORTE'?'':catalogue.find(a => a.id === (event.asset ?? 'bitcoin'))?.symbol ?? '';
     const row=cells($('events'), [date(event.at), `${symbol} · ${event.action}${event.mode==='fast'?' · CURTO':event.mode==='assisted'?' · ASSISTIDO':event.mode==='core'?' · CENÁRIO':event.mode==='data'?' · DADOS':''}`, '', money(event.fee??0), money(event.equity)]);
-    row.dataset.cycle=event.at;
+    row.dataset.cycle=event.at;row.dataset.eventId=event.id??`${event.at}:${event.asset}:${event.action}`;if(event.at===selectedCycle)row.classList.add('selected-cycle');
     const detail=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Ver decisão';detail.append(summary);
     detail.addEventListener('toggle',()=>{if(detail.open&&!detail.dataset.loaded){detail.dataset.loaded='true';const reason=document.createElement('p'),pre=document.createElement('pre');reason.textContent=event.reason;pre.textContent=JSON.stringify({parameters:event.parameters,indicators:event.indicators,quote:event.quote,before:event.before,after:event.after,learning:event.learning,realizedPnl:event.realizedPnl},null,2);detail.append(reason,pre);}});
-    row.children[2].append(detail);
+    row.children[2].append(detail);if(openReports.has(row.dataset.eventId))detail.open=true;
   }
   $('empty').textContent = s.events.length ? '' : 'Nenhum ciclo executado ainda.';
   renderChart(s);
@@ -128,7 +131,8 @@ async function update(action = 'status', body) {
     const latest = data.state.lastTick && Date.parse(`${data.state.lastTick}:00:00Z`);
     const stale = latest && Date.now() - latest > 90 * 60000;
     $('message').textContent = stale ? 'Sem ciclo há mais de 90 minutos. Confira o agendador e o relatório privado.' : `Conectado · consultado às ${date(Date.now())}${data.duplicate ? ' · Hora já processada' : ''}${action === 'configure' ? ' · Carteira salva, ainda pausada' : action === 'bootstrap' ? ' · Histórico real preparado; ciclo atual avaliado' : ''}`;
-  } catch (error) { if ([401, 403].includes(error.status)) showLogin(); $('message').textContent = error.message; }
+    return true;
+  } catch (error) { if ([401, 403].includes(error.status)) showLogin(); $('message').textContent = error.message; return false; }
   finally { busy = false; document.querySelectorAll('button').forEach(b => b.disabled = false); $('save-settings').disabled = !paused; $('bootstrap').disabled = paused; syncProposalButton(); }
 }
 $('settings').addEventListener('input', () => { dirty = true; mixSummary(); });
@@ -246,7 +250,7 @@ async function previewOrder(order) {
   if (assistBusy || !connected) return;
   assistBusy = true; clearProposal();
   try {
-    const { proposal: p } = await request('preview', order); currentProposal = p;
+    const { proposal: p } = await request(order.book==='fast'?'fast-preview':'preview', order); currentProposal = {...p,confirmAction:order.book==='fast'?'fast-confirm':'confirm'};
     $('proposal-title').textContent = `${p.action === 'COMPRAR' ? 'Comprar' : 'Vender'} ${catalogue.find(a => a.id === p.asset)?.symbol ?? p.asset} · somente simulação`;
     $('proposal-summary').textContent = `${p.quantity.toFixed(8)} unidades · preço de execução estimado ${money(p.executionPrice)} · taxa ${money(p.fee)} · ${p.action === 'COMPRAR' ? 'débito' : 'crédito'} ${money(Math.abs(p.amount))}.${p.costs?.lot===1?' Cotas inteiras; emolumentos de 0,03% e deslizamento de 0,05%, corretagem assumida zero.':''}${p.estimatedTax?` Reserva tributária estimada: ${money(p.estimatedTax)}.`:''}${p.settlement?` Crédito disponível em ${p.settlement} (D+2).`:''}`;
     $('proposal-impact').textContent = `Saldo após operação: ${money(p.after.cash)}. Patrimônio marcado ao preço atual: ${money(p.after.equity)} (impacto inicial ${money(p.after.equity - p.before.equity)}).${p.realizedPnl != null ? ` Resultado realizado estimado da posição: ${money(p.realizedPnl)}.` : ''}`;
@@ -268,9 +272,9 @@ $('assisted-form').addEventListener('submit', event => {
 $('proposal-cancel').addEventListener('click', clearProposal);
 $('proposal-confirm').addEventListener('click', async () => {
   if (!currentProposal || assistBusy || Date.now() >= currentProposal.expiresAt) return;
-  const token = currentProposal.token; assistBusy = true; syncProposalButton();
+  const token = currentProposal.token,confirmAction=currentProposal.confirmAction??'confirm'; assistBusy = true; syncProposalButton();
   try {
-    const data = await request('confirm', { token }); clearProposal(); render(data);
+    const data = await request(confirmAction, { token }); clearProposal(); render(data);
     $('assist-status').textContent = `Operação simulada registrada: ${data.execution.action}. Taxa ${money(data.execution.fee)}. Consulte o diário e o relatório privado.`;
   } catch (e) { clearProposal(); if ([401, 403].includes(e.status)) showLogin(); $('assist-status').textContent = e.message; }
   finally { assistBusy = false; syncProposalButton(); }
@@ -279,7 +283,7 @@ setInterval(syncProposalButton, 1000);
 function renderIntelligence(s) {
   const r = s.intelligence, latest = r?.latest;
   $('model-metrics').replaceChildren(); $('shadow-results').replaceChildren(); $('news-list').replaceChildren();
-  $('intelligence-status').textContent = s.researchError?.message ?? (r ? `Pesquisa atualizada em ${date(r.updatedAt)}. Modelo de 6h: ${r.metrics[6].trained}/100 resultados para liberar entradas na carteira experimental. Sem troca automática do motor principal.` : 'A pesquisa começará no próximo ciclo; você também pode atualizar agora.');
+  $('intelligence-status').textContent = s.researchError?.message ?? (r ? `Pesquisa atualizada em ${date(r.updatedAt)}. Modelo de 6h: ${r.metrics?.[6]?.trained??0}/100 resultados para liberar entradas na carteira experimental. Sem troca automática do motor principal.` : 'A pesquisa começará no próximo ciclo; você também pode atualizar agora.');
   if (!r) { $('news-sources').textContent = 'Fontes ainda não consultadas.'; return; }
   for (const h of [1, 6, 24]) {
     const m = r.metrics[h], card = document.createElement('article'), title = document.createElement('h3'), p = document.createElement('p');
@@ -313,7 +317,7 @@ async function loadResearch(before = null) {
 }
 $('research-log').addEventListener('click', () => loadResearch());
 $('research-more').addEventListener('click', () => loadResearch(researchCursor));
-restoreSession();
+
 
 function renderPerformance(s) {
   $('capital-upgrade').hidden=Boolean(s.capitalUpgrade)||s.initialCapital>=1000;
@@ -327,14 +331,15 @@ function renderPerformance(s) {
 $('capital-upgrade').addEventListener('click',()=>update('capital-upgrade'));
 
 function renderFast(s){
- const hybrid=s.config?.cryptoStrategy==='hybrid',f=s.fast;
+ const active=s.config?.cryptoStrategy==='active',hybrid=active||s.config?.cryptoStrategy==='hybrid',f=s.fast;
  const type=s.config?.profile.includes('agressivo')?'agressivo':s.config?.profile.includes('conservador')?'conservador':'moderado';
  const blend={conservador:[80,20,.6,.8,1],moderado:[50,50,.5,1,4],agressivo:[30,70,.5,1.2,8]}[type];
- $('fast-status').textContent=hybrid?`Híbrido ${type}: ${blend[0]}% cenário / ${blend[1]}% curto, dentro dos pesos de cripto. Entrada curta até ${blend[4]}% do capital por ativo, limitada ao saldo e exposição. Alvo líquido +${blend[2]}%; perda por posição de referência -${blend[3]}%. ${s.paused?'Simulação pausada.':'Habilitado para ciclos automáticos.'}`:'Escolha Híbrido em Estratégia automática para cripto e salve com a simulação pausada para habilitar as duas velocidades.';
+ $('fast-status').textContent=active?`Ativo adaptativo ${type}: entradas por liquidez, cenário e evidência acumulada; previsão direcional orienta seleção e saídas antecipadas. Limites da posição são definidos na entrada e preservados. Novos pools compartilham o caixa, com teto de ${s.config.discoveryPct??0}% do capital. Fonte de descoberta: ${s.discovery?.status??'primeira consulta pendente'}.`:hybrid?`Híbrido ${type}: ${blend[0]}% cenário / ${blend[1]}% curto, dentro dos pesos de cripto. Entrada curta até ${blend[4]}% do capital por ativo, limitada ao saldo e exposição. Alvo líquido +${blend[2]}%; perda por posição de referência -${blend[3]}%. ${s.paused?'Simulação pausada.':'Habilitado para ciclos automáticos.'}`:'Escolha Híbrido em Estratégia automática para cripto e salve com a simulação pausada para habilitar as duas velocidades.';
  $('fast-cycle').textContent=f?.updatedAt?`Último ciclo curto: ${date(f.updatedAt)}`:'Aguardando primeiro ciclo curto';
  const stats=f?.stats;$('fast-stats').textContent=stats?`${stats.buys} compras · ${stats.sells} vendas · ${stats.wins} saídas positivas / ${stats.losses} negativas · resultado realizado ${money(stats.realizedPnl)} · taxas acumuladas ${money(stats.fees)}. Lucro líquido de trade inclui custos de entrada e saída; impostos de cripto não incluídos.`:'As primeiras entradas exigem cerca de 4–6 minutos de coleta nova e estabilização; esperar também é uma decisão registrada.';
  $('fast-holdings').replaceChildren();
- for(const [id,p] of Object.entries(f?.positions??{}))if(p.quantity>0){const net=p.quantity*p.lastPrice*.999*.999-p.costBasis;cells($('fast-holdings'),[catalogue.find(a=>a.id===id)?.symbol??id,`${p.quantity.toFixed(8)} · ${money(p.quantity*p.lastPrice)}`,`${money(net)} (${(net/p.costBasis*100).toFixed(2)}%)`,`+${blend[2]}%`,`-${blend[3]}%`]);}
+ for(const [id,p] of Object.entries(f?.positions??{}))if(p.quantity>0){const net=p.quantity*p.lastPrice*.999*.999-p.costBasis;const row=cells($('fast-holdings'),[assetLabel(id),`${p.quantity.toFixed(8)} · ${money(p.quantity*p.lastPrice)}`,id.startsWith('solana:')?'Consultar prévia: impacto e taxas variáveis':`${money(net)} (${(net/p.costBasis*100).toFixed(2)}%)`,p.userExit?'Programado pelo usuário':`+${p.plan?.takeProfitPct??blend[2]}%`,`-${p.plan?.stopPct??blend[3]}%`,'']);
+ const actions=document.createElement('div');actions.className='actions';const sell=document.createElement('button'),schedule=document.createElement('button');sell.textContent='Vender agora';sell.addEventListener('click',()=>previewOrder({asset:id,action:'VENDER',book:'fast'}));schedule.textContent=p.userExit?'Editar programação':'Programar venda';schedule.className='secondary';schedule.addEventListener('click',()=>openSchedule(id,p));actions.append(sell,schedule);row.lastChild.append(actions);if(p.userExit){const note=document.createElement('small');note.textContent=`Programada: ${p.userExit.kind} ${p.userExit.kind==='time'?date(p.userExit.value):p.userExit.value}`;row.lastChild.append(note);}}
 }
 
 function openCycle(at,events){
@@ -355,3 +360,25 @@ function renderChart(s){
  $('chart').onclick=e=>{if(!points.length)return;const p=$('chart').createSVGPoint();p.x=e.clientX;p.y=e.clientY;const at=p.matrixTransform($('chart').getScreenCTM().inverse());const nearest=points.reduce((best,p)=>Math.abs(p.x-at.x)<Math.abs(best.x-at.x)?p:best);openCycle(nearest.event.at,s.events);};
  $('chart-note').textContent=points.length?`De ${money(Math.min(...values))} a ${money(Math.max(...values))} · ${points.length} ciclos desde o último aporte · clique em um ponto para abrir aquele momento.`:'O gráfico aparece após o primeiro ciclo.';
 }
+
+let scheduledAsset=null;
+function openSchedule(id,position){scheduledAsset=id;$('sale-schedule-title').textContent=`Programar venda · ${assetLabel(id)} · posição curta`;$('sale-condition').value=position.userExit?.kind??'net';$('sale-value').value=position.userExit&&position.userExit.kind!=='time'?position.userExit.value:1;if(position.userExit?.kind==='time')$('sale-time').value=new Date(Date.parse(position.userExit.value)-3*3600000).toISOString().slice(0,16);$('sale-schedule-form').hidden=false;syncSaleCondition();$('sale-schedule-form').scrollIntoView({behavior:'smooth',block:'center'});}
+function syncSaleCondition(){const timed=$('sale-condition').value==='time';$('sale-number-label').hidden=timed;$('sale-time-label').hidden=!timed;$('sale-value').required=!timed;$('sale-time').required=timed;}
+$('sale-condition').addEventListener('change',syncSaleCondition);
+$('sale-close-form').addEventListener('click',()=>{$('sale-schedule-form').hidden=true;});
+$('sale-schedule-form').addEventListener('submit',async e=>{e.preventDefault();const kind=$('sale-condition').value,value=kind==='time'?new Date($('sale-time').value+':00-03:00').toISOString():Number($('sale-value').value);const ok=await update('schedule-sale',{asset:scheduledAsset,kind,value,expectedVersion:version});if(ok){$('sale-schedule-form').hidden=true;$('sale-message').textContent='Venda programada salva; os limites de perda continuam ativos.';}});
+$('sale-cancel-order').addEventListener('click',async()=>{const ok=await update('schedule-sale',{asset:scheduledAsset,kind:'cancel',expectedVersion:version});if(ok){$('sale-schedule-form').hidden=true;$('sale-message').textContent='Programação removida.';}});
+
+
+
+function renderPredictions(s){
+ const h=$('prediction-horizon').value,r=s.intelligence,live=r?.directionMetrics?.[h],reports=Object.values(r?.history??{}),tested=reports.map(v=>v.metrics?.[h]).filter(Boolean),n=tested.reduce((v,m)=>v+m.samples,0),correct=tested.reduce((v,m)=>v+m.correct,0);
+ $('prediction-score').textContent=live?.scored?`${(live.accuracy*100).toFixed(1)}%`:'Em avaliação';$('prediction-count').textContent=live?.scored?`${live.correct} acertos / ${live.scored} previsões concluídas · ${live.flatExcluded??0} estáveis excluídas`:'As previsões novas serão conferidas no horizonte escolhido; nenhuma é contada como acerto antecipadamente.';
+ $('history-score').textContent=n?`${(correct/n*100).toFixed(1)}%`:'Não importado';$('history-count').textContent=n?`${correct}/${n} casos de teste cronológico · ${tested.length} ativos · não é resultado ao vivo`:'O passado público pode ser importado agora, sem esperar formar histórico local.';
+ $('prediction-status').textContent=`${r?.directionPending?.filter(p=>String(p.horizon)===h).length??0} previsões aguardando avaliação em ${h}h. Escopo: criptoativos com histórico horário importado; ETFs e novos pools não entram nesta taxa. Modelo: regressão logística com indicadores técnicos. Notícias não entram no modelo direcional histórico; o laboratório mantém a pesquisa de notícias separada.`;
+ $('prediction-items').replaceChildren();for(const p of (r?.directionPending??[]).filter(p=>String(p.horizon)===h).slice(-12).reverse()){const line=document.createElement('p');line.textContent=`${assetLabel(p.asset)} · ${p.probability>=.5?'SUBIR':'DESCER'} · probabilidade estimada ${(Math.max(p.probability,1-p.probability)*100).toFixed(1)}% · prevista em ${date(p.knownAt)} · avaliar em ${date(p.targetAt)}`;$('prediction-items').append(line);}
+}
+function renderLearning(s){const l=s.learning;$('learning-summary').textContent=l?`${l.closed} resultados de entradas avaliados · atualizado ${date(l.updatedAt)}`:'Hipóteses de entrada são registradas; aprendizado de resultado ocorre na saída, sem inventar acertos.';$('learning-items').replaceChildren();for(const item of [...(l?.summaries??[])].reverse().slice(0,30)){const d=document.createElement('details'),summary=document.createElement('summary'),p=document.createElement('p');summary.textContent=`${date(item.at)} · ${assetLabel(item.asset)} · ${item.netPct.toFixed(2)}% líquido`;p.textContent=item.summary+' Próxima postura: '+(item.nextBehavior?.reason??'avaliar mais exemplos');d.append(summary,p);$('learning-items').append(d);}}
+$('prediction-horizon').addEventListener('change',()=>{if(currentViewState)renderPredictions(currentViewState);});
+$('train-history').addEventListener('click',async()=>{if(!currentViewState)return;const ids=Object.keys(currentViewState.config?.allocations??{}).filter(id=>catalogue.find(a=>a.id===id)?.market!=='b3');$('train-history').disabled=true;let trained=0;const failed=[];for(const asset of ids){$('training-status').textContent=`Importando ${trained+failed.length+1}/${ids.length}: ${assetLabel(asset)}…`;try{const result=await request('history-train',{asset});render(result);trained++;}catch(e){failed.push(assetLabel(asset));}}$('training-status').textContent=`${trained} ativos com histórico importado e teste cronológico concluído.${failed.length?' Sem fonte válida: '+failed.join(', '):''}`;$('train-history').disabled=false;});
+restoreSession();

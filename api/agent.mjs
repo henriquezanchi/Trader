@@ -1,6 +1,8 @@
+import { historicalDirection, applyHistoricalDirection } from '../lib/forecast-history.mjs';
+import { fastSalePreview, fastSaleConfirm, scheduleSale } from '../lib/fast-control.mjs';
 import { upgradeCapital, updatePerformance } from '../lib/performance.mjs';
 import { getETFs, ETF_IDS } from '../lib/markets.mjs';
-import { repository, runTick, getQuotes } from '../lib/services.mjs';
+import { repository, runTick, getQuotes, getPortfolioQuotes } from '../lib/services.mjs';
 import { equity, LIMITS } from '../lib/engine.mjs';
 import { ASSETS, PROFILES, configurePortfolio, stopReason } from '../lib/portfolio.mjs';
 import { readBody } from '../lib/http.mjs';
@@ -21,7 +23,7 @@ export default async function handler(req, res) {
     catch (error) { return res.status(error.status ?? 503).json({ error: error.status ? error.message : 'Serviço de acesso indisponível' }); }
     if (req.method !== 'GET' && !sameOrigin(req)) return res.status(403).json({ error: 'Origem da solicitação inválida' });
   }
-  if (!['status', 'tick', 'pause', 'resume', 'configure', 'audit', 'bootstrap', 'opportunities', 'preview', 'confirm', 'research', 'research-refresh', 'capital-upgrade', 'markets'].includes(action)) return res.status(400).json({ error: 'Ação desconhecida' });
+  if (!['status', 'tick', 'pause', 'resume', 'configure', 'audit', 'bootstrap', 'opportunities', 'preview', 'confirm', 'research', 'research-refresh', 'capital-upgrade', 'markets', 'fast-preview', 'fast-confirm', 'schedule-sale', 'history-train'].includes(action)) return res.status(400).json({ error: 'Ação desconhecida' });
   if (req.method !== (['status', 'audit', 'opportunities', 'research', 'markets'].includes(action) ? 'GET' : 'POST')) return res.status(405).json({ error: 'Método não permitido' });
   try {
     const repo = repository();
@@ -37,8 +39,27 @@ export default async function handler(req, res) {
       if (scheduler) return res.status(200).json({ duplicate: result.duplicate, version: result.version });
       return res.status(200).json({ ...result, limits: LIMITS, assets: ASSETS, profiles: PROFILES });
     }
+    if(action==='history-train'){
+      const body=await readBody(req);let trained;
+      try{trained=await historicalDirection(body.asset);}catch(error){return res.status(503).json({error:error.message});}
+      const latest=await repo.read(),result=applyHistoricalDirection(latest.state,trained);
+      if(!result.duplicate)await repo.commit(latest.version,result.state);
+      return res.status(200).json({state:result.state,version:latest.version+Number(!result.duplicate),assets:ASSETS,profiles:PROFILES,limits:LIMITS,duplicate:result.duplicate});
+    }
     if(action==='markets')return res.status(200).json({quotes:await getETFs(ETF_IDS)});
     const { version, state } = await repo.read();
+    if(action==='schedule-sale'){
+      let next;try{next=scheduleSale(state,await readBody(req),version,userId);}catch(error){return res.status(409).json({error:error.message});}
+      await repo.commit(version,next);return res.status(200).json({state:next,version:version+1,limits:LIMITS,assets:ASSETS,profiles:PROFILES});
+    }
+    if(action==='fast-preview'||action==='fast-confirm'){
+      const body=await readBody(req),{quotes}=await getPortfolioQuotes(state);
+      try{
+        if(action==='fast-preview')return res.status(200).json({proposal:fastSalePreview(state,quotes,body.asset,version,userId)});
+        const result=fastSaleConfirm(state,quotes,body.token,version,userId);result.state=await updatePerformance(result.state);await repo.commit(version,result.state);
+        return res.status(200).json({...result,version:version+1,limits:LIMITS,assets:ASSETS,profiles:PROFILES});
+      }catch(error){return res.status(409).json({error:error.message});}
+    }
     if(action==='capital-upgrade'){
       const next=upgradeCapital(state);
       if(next===state)return res.status(200).json({state,version,limits:LIMITS,assets:ASSETS,profiles:PROFILES});

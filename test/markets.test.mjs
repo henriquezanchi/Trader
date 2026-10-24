@@ -40,7 +40,7 @@ test('CDI usa taxas publicadas, sem projetar futuro nem contar aporte como retor
 test('DCA começa sem janela técnica, respeita frequência semanal e teto de BTC',()=>{
  const s=state('moderado');s.config.cryptoStrategy='dca-weekly';let n=portfolioStep(s,quotes(s),now).state;assert.equal(n.events.filter(e=>e.action==='COMPRAR').length,1);assert.equal(n.events.find(e=>e.action==='COMPRAR').asset,'bitcoin');assert.equal(n.cash,990);
  const next=portfolioStep(n,quotes(n,now+3600000),now+3600000).state;assert.equal(next.cash,990);assert.ok(next.events.at(-3).reason.includes('DCA')||next.events.some(e=>e.reason.includes('próximo aporte')));
- n.portfolio.bitcoin.quantity=.5;n.portfolio.bitcoin.lastPrice=100;n.cash=950;const capped=portfolioStep(n,quotes(n,now+8*86400000),now+8*86400000).state;assert.equal(capped.cash,n.cash);
+ n.portfolio.bitcoin.quantity=.5;n.portfolio.bitcoin.lastPrice=100;n.portfolio.bitcoin.costBasis=50;n.cash=950;const capped=portfolioStep(n,quotes(n,now+8*86400000),now+8*86400000).state;assert.equal(capped.cash,n.cash);
 });
 
 test('RSI compra somente após cruzar 30 com reação; RSI baixo isolado não basta',()=>{
