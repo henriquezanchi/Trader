@@ -51,3 +51,11 @@ test('RSI compra somente após cruzar 30 com reação; RSI baixo isolado não ba
  for(const v of Object.values(q))v.price=90;
  const recovered=portfolioStep(s,q,now).state;assert.ok(recovered.events.some(e=>e.action==='COMPRAR'));assert.equal(recovered.events.find(e=>e.action==='COMPRAR').parameters.engine,'rsi-recovery-v1');assert.ok(recovered.cash>=0);
 });
+
+test('catálogo ampliado contém 16 ativos únicos e busca dez criptos em um único lote',async()=>{
+ const {ASSETS}=await import('../lib/portfolio.mjs');const {getQuotes}=await import('../lib/services.mjs');
+ assert.equal(ASSETS.length,16);assert.equal(new Set(ASSETS.map(a=>a.id)).size,16);
+ const ids=ASSETS.filter(a=>a.market!=='b3').map(a=>a.id);assert.equal(ids.length,10);let calls=0;
+ const q=await getQuotes(ids,async()=>{calls++;return {ok:true,json:async()=>Object.fromEntries(ids.map(id=>[id,{brl:100,last_updated_at:now/1000,brl_24h_vol:1e9}]))};},now);
+ assert.equal(calls,1);assert.equal(Object.keys(q).length,10);
+});

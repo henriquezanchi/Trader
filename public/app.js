@@ -101,6 +101,8 @@ function render(data) {
   const warming = s.config?.cryptoStrategy!=='dca-weekly' && selected.filter(id=>catalogue.find(a=>a.id===id)?.market!=='b3').some(id => sequenceLength(holdings[id]?.observations ?? []) < 24);
   $('activity-summary').textContent = `${cycles.size} ciclos ao vivo registrados · ${historicalSamples} amostras históricas para indicadores · ${trades} compras ou vendas simuladas · ${recentEvents.filter(e => e.action === 'AGUARDAR').length} decisões de aguardar.`;
   $('activity-reason').textContent = trades ? 'Veja as decisões e seus motivos no diário abaixo. Taxas e deslizamento contam no resultado e nos limites de perda.' : warming ? 'Sem negociações: a sequência de 24 observações horárias ainda não está completa. Intervalos maiores que 90 minutos interrompem a sequência. Sem posições, o caixa virtual não rende.' : s.paused ? 'A simulação está pausada. Veja os motivos no diário abaixo.' : s.config?.cryptoStrategy==='dca-weekly' ? 'DCA semanal: o ciclo verifica a data do próximo aporte e o teto de 5% em BTC; não é uma estratégia de trade diário.' : 'A janela de dados está completa; o motor aguarda um sinal e respeita os limites configurados.';
+  const latestEvent=s.events.at(-1), latestCycle=latestEvent?s.events.filter(e=>e.at===latestEvent.at):[];
+  $('diary-latest').textContent=latestEvent?`Último ciclo ${date(latestEvent.at)} · ${latestCycle.length} decisões · mais recente: ${catalogue.find(a=>a.id===latestEvent.asset)?.symbol??'Dados'} ${latestEvent.action} — ${latestEvent.reason}`:'Aguardando primeiro ciclo.';
   $('events').replaceChildren();
   for (const event of [...s.events].reverse()) {
     const symbol = event.action==='APORTE'?'':catalogue.find(a => a.id === (event.asset ?? 'bitcoin'))?.symbol ?? '';

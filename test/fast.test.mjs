@@ -41,3 +41,11 @@ test('falha da fonte grava AGUARDAR privado sem mudar dinheiro ou posições',as
  await assert.rejects(runTick(repo,async()=>{throw Error('source offline')},start));assert.equal(row.state.cash,initial.cash);assert.deepEqual(row.state.portfolio,initial.portfolio);assert.equal(row.state.events.at(-1).mode,'data');assert.equal(row.state.events.at(-1).action,'AGUARDAR');assert.equal(row.version,1);
  await assert.rejects(runTick(repo,async()=>{throw Error('source offline')},start));assert.equal(row.version,1);
 });
+
+test('dez criptos compartilham o mesmo caixa e teto de exposição, sem multiplicar capital',()=>{
+ let s=initialState(1000);s.paused=true;s=configurePortfolio(s,{profile:'diversificado-agressivo',...PROFILES['diversificado-agressivo'],cryptoStrategy:'hybrid'});s.paused=false;
+ const ids=Object.keys(s.config.allocations).filter(id=>!['bova11','ivvb11'].includes(id));
+ for(let i=0;i<3;i++){const at=start+i*120000,q=Object.fromEntries(ids.map(id=>[id,{price:100,observedAt:new Date(at).toISOString()}]));s=fastStep(s,q,at).state;}
+ assert.equal(s.fast.stats.buys,10);assert.ok(s.cash>=0);assert.ok(equity(s)<=1000);assert.ok(1000-s.cash<=s.initialCapital*s.config.exposurePct/100);
+ for(const [id,p] of Object.entries(s.fast.positions))assert.ok(p.quantity*p.lastPrice<=s.initialCapital*s.config.allocations[id]/100);
+});
