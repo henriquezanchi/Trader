@@ -47,3 +47,7 @@ test('resultados semelhantes mudam a entrada futura; não duplicar a própria am
  for(let i=0;i<12;i++){const p={quantity:1,costBasis:100},event={id:'buy'+i,quantity:1,before:{cash:1000,quantity:0},after:{cash:900}};recordEntry(s,p,'bitcoin',q,learningPlan(s,'bitcoin',q,base,now),event,now);recordExit(s,p.learningEntry,{id:'sell'+i,asset:'bitcoin',reason:'test',realizedPnl:-1,quote:q},now);}
  const p=learningPlan(s,'bitcoin',q,base,now);assert.equal(p.sizeFactor,.25);assert.equal(p.evidence.weightedSample,12);assert.ok(learningPlan(s,'solana',q,base,now).sizeFactor>p.sizeFactor);
 });
+
+test('liquidação hipotética de pool nunca devolve mais que a reserva disponível',async()=>{
+ const {fill}=await import('../lib/markets.mjs');const order=fill('solana:'+'A'.repeat(32),'VENDER',1e9,0,{quantity:1e15,costBasis:20,liquidityBRL:10},now);assert.ok(order.cashChange<=5);assert.ok(Number.isFinite(order.cashChange));
+});
