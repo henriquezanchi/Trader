@@ -61,12 +61,13 @@ function render(data) {
   if (currentProposal && currentProposal.version !== data.version) { clearProposal(); $('assist-status').textContent = 'A carteira mudou; solicite uma nova proposta.'; }
   renderIntelligence(s);
   renderPerformance(s);
+  renderFast(s);
   const activeAssets = [...new Set([...Object.keys(s.config?.allocations ?? {}), ...Object.keys(s.portfolio ?? {}).filter(id => s.portfolio[id].quantity > 0)])];
   const chosen = $('assist-asset').value; $('assist-asset').replaceChildren();
   for (const id of activeAssets) { const o = document.createElement('option'); o.value = id; o.textContent = catalogue.find(a => a.id === id)?.symbol ?? id; $('assist-asset').append(o); }
   if (activeAssets.includes(chosen)) $('assist-asset').value = chosen;
   const holdings = s.portfolio ?? { bitcoin: { quantity: s.btc, lastPrice: s.lastPrice, observations: s.observations } };
-  const exposure = Object.values(holdings).reduce((v, p) => v + p.quantity * (p.lastPrice ?? 0), 0), total = s.cash + exposure + (s.unsettled??[]).reduce((v,x)=>v+x.amount,0);
+  const exposure = Object.values(holdings).reduce((v, p) => v + p.quantity * (p.lastPrice ?? 0), 0) + Object.values(s.fast?.positions??{}).reduce((v,p)=>v+p.quantity*(p.lastPrice??0),0), total = s.cash + exposure + (s.unsettled??[]).reduce((v,x)=>v+x.amount,0);
   $('equity').textContent = money(total); $('cash').textContent = money(s.cash);
   $('result').textContent = `${money(total - s.initialCapital)} desde o início`;
   $('exposure').textContent = money(exposure);
@@ -76,7 +77,7 @@ function render(data) {
   paused = s.paused;
   $('status').textContent = paused ? 'Pausado' : s.startedAt ? 'Habilitado para ciclos' : 'Simulação habilitada';
   $('pause').textContent = paused ? 'Iniciar / retomar' : 'Pausar';
-  $('reason').textContent = s.reason;
+  $('reason').textContent = `${s.reason}${s.dataStatus?.status==='unavailable'?` · ${s.dataStatus.message} (${date(s.dataStatus.at)})`:''}`;
   $('warmup').textContent = 'Cripto usa observações horárias; ETFs usam 24 pregões concluídos, obtidos da fonte. DCA semanal não exige janela técnica. O botão iniciar habilita o motor; fechar esta aba não configura o agendador. Acompanhe a última execução.';
   $('settings-fields').disabled = false;
   $('save-settings').disabled = !paused || busy;
@@ -103,7 +104,7 @@ function render(data) {
   $('events').replaceChildren();
   for (const event of [...s.events].reverse()) {
     const symbol = event.action==='APORTE'?'':catalogue.find(a => a.id === (event.asset ?? 'bitcoin'))?.symbol ?? '';
-    cells($('events'), [date(event.at), `${symbol} · ${event.action}`, event.reason, money(event.fee??0), money(event.equity)]);
+    cells($('events'), [date(event.at), `${symbol} · ${event.action}${event.mode==='fast'?' · CURTO':event.mode==='assisted'?' · ASSISTIDO':event.mode==='core'?' · CENÁRIO':event.mode==='data'?' · DADOS':''}`, event.reason, money(event.fee??0), money(event.equity)]);
   }
   $('empty').textContent = s.events.length ? '' : 'Nenhum ciclo executado ainda.';
   const values = s.events.filter(x=>!s.capitalUpgrade||Date.parse(x.at)>=Date.parse(s.capitalUpgrade.at)).map(x => x.equity);
@@ -317,3 +318,14 @@ function renderPerformance(s) {
   const pending=(s.unsettled??[]).reduce((v,x)=>v+x.amount,0);$('settlement-note').textContent=pending?`${money(pending)} em liquidação D+2: incluído no patrimônio e indisponível para novas compras.`:'Nenhum valor em liquidação.';
 }
 $('capital-upgrade').addEventListener('click',()=>update('capital-upgrade'));
+
+function renderFast(s){
+ const hybrid=s.config?.cryptoStrategy==='hybrid',f=s.fast;
+ const type=s.config?.profile.includes('agressivo')?'agressivo':s.config?.profile.includes('conservador')?'conservador':'moderado';
+ const blend={conservador:[80,20,.6,.8,1],moderado:[50,50,.5,1,4],agressivo:[30,70,.5,1.2,8]}[type];
+ $('fast-status').textContent=hybrid?`Híbrido ${type}: ${blend[0]}% cenário / ${blend[1]}% curto, dentro dos pesos de cripto. Entrada curta até ${blend[4]}% do capital por ativo, limitada ao saldo e exposição. Alvo líquido +${blend[2]}%; perda por posição de referência -${blend[3]}%. ${s.paused?'Simulação pausada.':'Habilitado para ciclos automáticos.'}`:'Escolha Híbrido em Estratégia automática para cripto e salve com a simulação pausada para habilitar as duas velocidades.';
+ $('fast-cycle').textContent=f?.updatedAt?`Último ciclo curto: ${date(f.updatedAt)}`:'Aguardando primeiro ciclo curto';
+ const stats=f?.stats;$('fast-stats').textContent=stats?`${stats.buys} compras · ${stats.sells} vendas · ${stats.wins} saídas positivas / ${stats.losses} negativas · resultado realizado ${money(stats.realizedPnl)} · taxas acumuladas ${money(stats.fees)}. Lucro líquido de trade inclui custos de entrada e saída; impostos de cripto não incluídos.`:'As primeiras entradas exigem cerca de 4–6 minutos de coleta nova e estabilização; esperar também é uma decisão registrada.';
+ $('fast-holdings').replaceChildren();
+ for(const [id,p] of Object.entries(f?.positions??{}))if(p.quantity>0){const net=p.quantity*p.lastPrice*.999*.999-p.costBasis;cells($('fast-holdings'),[catalogue.find(a=>a.id===id)?.symbol??id,`${p.quantity.toFixed(8)} · ${money(p.quantity*p.lastPrice)}`,`${money(net)} (${(net/p.costBasis*100).toFixed(2)}%)`,`+${blend[2]}%`,`-${blend[3]}%`]);}
+}

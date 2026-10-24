@@ -88,12 +88,14 @@ test('fonte de preço exige sucesso, preço e timestamp recente', async () => {
   await assert.rejects(getQuote(async () => ({ ok: true, json: async () => ({ bitcoin: { brl: 500000 } }) }), start));
   await assert.rejects(getQuote(fetcher, start + 600001));
 });
-test('falha da fonte não grava saldo nem histórico', async () => {
-  let commits = 0;
-  const repo = { read: async () => ({ version: 0, state: initialState() }), commit: async () => commits++ };
-  await assert.rejects(runTick(repo, async () => { throw new Error('Offline'); }, start));
-  assert.equal(commits, 0);
+test('falha da fonte preserva saldo e observações e registra a decisão de proteção', async () => {
+  let stored;
+  const initial=initialState();
+  const repo={read:async()=>({version:0,state:initial}),commit:async(v,s)=>{assert.equal(v,0);stored=s;}};
+  await assert.rejects(runTick(repo,async()=>{throw Error('offline')}));
+  assert.equal(stored.cash,initial.cash);assert.equal(stored.btc,initial.btc);assert.deepEqual(stored.observations,initial.observations);assert.equal(stored.events.at(-1).action,'AGUARDAR');assert.equal(stored.events.at(-1).mode,'data');
 });
+
 test('token obrigatório, comparação exata e configuração mínima', () => {
   const token = 'a'.repeat(64);
   assert.equal(authorized(`Bearer ${token}`, token), true);
