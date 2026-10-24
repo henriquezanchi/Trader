@@ -1,4 +1,4 @@
-import { historicalDirection, applyHistoricalDirection } from '../lib/forecast-history.mjs';
+import { historicalDirection, commitHistoricalDirection } from '../lib/forecast-history.mjs';
 import { fastSalePreview, fastSaleConfirm, scheduleSale } from '../lib/fast-control.mjs';
 import { upgradeCapital, updatePerformance } from '../lib/performance.mjs';
 import { getETFs, ETF_IDS } from '../lib/markets.mjs';
@@ -42,9 +42,8 @@ export default async function handler(req, res) {
     if(action==='history-train'){
       const body=await readBody(req);let trained;
       try{trained=await historicalDirection(body.asset);}catch(error){return res.status(503).json({error:error.message});}
-      const latest=await repo.read(),result=applyHistoricalDirection(latest.state,trained);
-      if(!result.duplicate)await repo.commit(latest.version,result.state);
-      return res.status(200).json({state:result.state,version:latest.version+Number(!result.duplicate),assets:ASSETS,profiles:PROFILES,limits:LIMITS,duplicate:result.duplicate});
+      const result=await commitHistoricalDirection(repo,trained);
+      return res.status(200).json({...result,assets:ASSETS,profiles:PROFILES,limits:LIMITS});
     }
     if(action==='markets')return res.status(200).json({quotes:await getETFs(ETF_IDS)});
     const { version, state } = await repo.read();

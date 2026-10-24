@@ -51,3 +51,7 @@ test('resultados semelhantes mudam a entrada futura; não duplicar a própria am
 test('liquidação hipotética de pool nunca devolve mais que a reserva disponível',async()=>{
  const {fill}=await import('../lib/markets.mjs');const order=fill('solana:'+'A'.repeat(32),'VENDER',1e9,0,{quantity:1e15,costBasis:20,liquidityBRL:10},now);assert.ok(order.cashChange<=5);assert.ok(Number.isFinite(order.cashChange));
 });
+
+test('patrimônio de pool usa valor de saída pela reserva, não valorização sem liquidez',()=>{
+ const s=state(true);s.fast={positions:{['solana:'+'A'.repeat(32)]:{quantity:1e12,lastPrice:1e9,costBasis:20,liquidityBRL:10}}};assert.ok(equity(s)<=1005);assert.ok(Number.isFinite(equity(s)));
+});

@@ -28,3 +28,9 @@ test('histórico CoinGecko usa pontos reais por hora, sem interpolar ou aceitar 
  const {parseCoinGeckoHistory,historicalDirection}=await import('../lib/forecast-history.mjs');const rows=points().map(p=>[Date.parse(p.at),p.price]);rows.push([now+3600000,999]);const parsed=parseCoinGeckoHistory({prices:rows},now);assert.equal(parsed.length,400);assert.ok(parsed.every(p=>Date.parse(p.at)<=now));
  const fit=await historicalDirection('bitcoin',async()=>({ok:true,json:async()=>({prices:rows})}),now);assert.match(fit.report.source,/CoinGecko/);assert.ok(fit.report.metrics[1].samples>0);
 });
+
+test('importação repete só o merge em conflito, preservando operação concorrente',async()=>{
+ const {commitHistoricalDirection}=await import('../lib/forecast-history.mjs');const trained=fitHistoricalDirection(points(),'bitcoin',now);let row={state:state(),version:1},attempts=0;
+ const repo={read:async()=>structuredClone(row),commit:async(v,next)=>{attempts++;if(attempts===1){row.state.cash=900;row.version++;throw Error('Outra execução alterou o estado. Atualize e tente novamente');}assert.equal(v,row.version);row={state:next,version:v+1};}};
+ const result=await commitHistoricalDirection(repo,trained,now);assert.equal(attempts,2);assert.equal(result.state.cash,900);assert.ok(result.state.intelligence.history.bitcoin);assert.equal(result.version,3);
+});
