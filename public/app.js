@@ -3,7 +3,7 @@ let connected = false, paused = false, version = null, catalogue = [], profiles 
 const $ = id => document.getElementById(id);
 const money = value => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 const date = value => new Date(value).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-const fields = ['exposurePct', 'orderPct', 'dailyLossPct', 'totalLossPct', 'targetPct', 'days', 'discoveryPct'];
+const fields = ['exposurePct', 'orderPct', 'dailyLossPct', 'totalLossPct', 'targetPct', 'days', 'discoveryPct', 'learningExplorationPct'];
 async function authCall(action, body) {
   const response = await fetch(`/api/auth?action=${action}`, { method: action === 'session' ? 'GET' : 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, ...(action === 'session' ? {} : { body: JSON.stringify(body ?? {}) }), cache: 'no-store', signal: AbortSignal.timeout(15000) });
   const data = await response.json();
@@ -11,14 +11,14 @@ async function authCall(action, body) {
   return data;
 }
 async function request(action = 'status', body, retry = true, before, query = {}) {
-  const response = await fetch(`/api/agent?action=${action}${before ? `&before=${encodeURIComponent(before)}` : ''}${Object.entries(query).map(([k,v])=>'&'+encodeURIComponent(k)+'='+encodeURIComponent(v)).join('')}`, { method: ['status', 'audit', 'opportunities', 'research', 'quality', 'chart', 'chart-cycle'].includes(action) ? 'GET' : 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}), cache: 'no-store', signal: AbortSignal.timeout(35000) });
+  const response = await fetch(`/api/agent?action=${action}${before ? `&before=${encodeURIComponent(before)}` : ''}${Object.entries(query).map(([k,v])=>'&'+encodeURIComponent(k)+'='+encodeURIComponent(v)).join('')}`, { method: ['status', 'audit', 'opportunities', 'research', 'quality', 'chart', 'chart-cycle', 'scenario-report'].includes(action) ? 'GET' : 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}), cache: 'no-store', signal: AbortSignal.timeout(35000) });
   if (response.status === 401 && retry) { await authCall('refresh'); return request(action, body, false, before, query); }
   const data = await response.json();
   if (!response.ok) { const error = new Error(data.error ?? 'Serviço indisponível'); error.status = response.status; throw error; }
   return data;
 }
 function showLogin() {
-  connected = false; version = null; dirty = false; chartCache=null; chartRequestId++; chartLoading=false;
+  connected = false; version = null; dirty = false; chartCache=null; chartRequestId++; chartLoading=false; scenarioCache=null;
   $('dashboard').hidden = true; $('audit-panel').hidden = true; $('audit-entries').replaceChildren(); $('reset-panel').hidden = true; $('login').hidden = false;
   clearProposal(); $('assist-enabled').checked = false; $('assist-opportunities').replaceChildren(); $('research-entries').replaceChildren();
   $('password').value = ''; $('new-password').value = ''; $('confirm-password').value = '';
@@ -42,7 +42,7 @@ function cells(parent, texts) {
 function fillSettings(c) {
   $('profile').value = c.profile;
   $('crypto-strategy').value=c.cryptoStrategy??'trend';
-  for (const key of fields) $(key).value = key==='discoveryPct'?(c.discoveryPct??(c.profile.includes('agressivo')?15:c.profile.includes('conservador')?0:5)):c[key];
+  for (const key of fields) $(key).value = key==='learningExplorationPct'?(c.learningExplorationPct??20):key==='discoveryPct'?(c.discoveryPct??(c.profile.includes('agressivo')?15:c.profile.includes('conservador')?0:5)):c[key];
   for (const a of catalogue) $(`weight-${a.id}`).value = c.allocations[a.id] ?? 0;
   mixSummary();
 }
@@ -66,6 +66,8 @@ function render(data) {
   renderFast(s);
   renderPredictions(s);
   renderLearning(s);
+  renderScenarioLive(s);
+  if((!scenarioCache||Date.now()-scenarioLoadedAt>300000)&&!scenarioLoading&&!scenarioRunning&&!document.querySelector('#scenario-results details[open]'))loadScenarioReports();
   const activeAssets = [...new Set([...Object.keys(s.config?.allocations ?? {}), ...Object.keys(s.portfolio ?? {}).filter(id => s.portfolio[id].quantity > 0)])];
   const chosen = $('assist-asset').value; $('assist-asset').replaceChildren();
   for (const id of activeAssets) { const o = document.createElement('option'); o.value = id; o.textContent = catalogue.find(a => a.id === id)?.symbol ?? id; $('assist-asset').append(o); }
@@ -79,7 +81,7 @@ function render(data) {
   $('last-cycle').textContent = s.lastTick ? date(`${s.lastTick}:00:00Z`) : 'Não executado';
   $('updated').textContent = 'Confira a continuidade da coleta abaixo';
   paused = s.paused;
-  $('exploration-status').textContent=s.config?.simulationExploration?'Exploração simulada ativa: sem limites de perda e exposição, stop de perda ou bloqueios econômicos. Compras usam apenas o caixa virtual. Saídas por alvo, prazo ou sua ordem.':'Simulação com os limites do perfil.';
+  $('exploration-status').textContent=s.config?.simulationExploration?'Exploração simulada ativa: sem limites de perda e exposição, stop de perda ou bloqueios econômicos. Compras usam apenas o caixa virtual. Saídas por alvo, prazo ou sua ordem.'+(s.config.learningPolicy==='paper-entry-value-v1'?` Aprendizado de entradas: ${s.config.learningExplorationPct??20}% para testes; restante para oportunidades com evidência líquida favorável ou caixa.`:''):'Simulação com os limites do perfil.';
   $('exploration-toggle').textContent=s.config?.simulationExploration?'Restaurar limites e pausar':'Ativar exploração simulada';
   $('status').textContent = paused ? 'Pausado' : s.startedAt ? 'Habilitado para ciclos' : 'Simulação habilitada';
   $('pause').textContent = paused ? 'Iniciar / retomar' : 'Pausar';
@@ -133,7 +135,7 @@ $('profile').addEventListener('change', () => { const profile = $('profile').val
 $('settings').addEventListener('submit', event => {
   event.preventDefault();
   if (!paused) { $('message').textContent = 'Pause a simulação antes de salvar a carteira.'; return; }
-  const config = { simulationExploration:currentViewState?.config?.simulationExploration??false, profile: $('profile').value, cryptoStrategy:$('crypto-strategy').value, allocations: {} };
+  const config = { simulationExploration:currentViewState?.config?.simulationExploration??false, learningPolicy:currentViewState?.config?.learningPolicy??'legacy', profile: $('profile').value, cryptoStrategy:$('crypto-strategy').value, allocations: {} };
   for (const key of fields) config[key] = Number($(key).value);
   for (const a of catalogue) { const value = Number($(`weight-${a.id}`).value); if (value) config.allocations[a.id] = value; }
   update('configure', { config, expectedVersion: version });
@@ -430,6 +432,8 @@ function renderLearning(s){
  const l=s.learning;
  $('learning-summary').textContent=l?`${l.closed} resultados de entradas avaliados · atualizado ${date(l.updatedAt)}`:'Hipóteses de entrada são registradas; aprendizado de resultado ocorre na saída, sem inventar acertos.';
  $('learning-arms').replaceChildren();
+ $('entry-learning-status').textContent=s.config?.simulationExploration&&s.config?.learningPolicy==='paper-entry-value-v1'?`Compra comparada com caixa (0%): ${s.config.learningExplorationPct??20}% do patrimônio para testar; restante só para a melhor alternativa de ajuste que também tenha validação líquida positiva. A validação é reservada na entrada e não treina o ajuste.`:'Aprendizado de entradas inativo neste modo.';
+ $('entry-reference-results').replaceChildren();const refs=Object.entries(l?.entryReferences?.stats??{});if(refs.length){const table=document.createElement('table'),head=document.createElement('thead'),body=document.createElement('tbody');cells(head,['Família / saída','Comparações conhecidas','Compra superou caixa','Média líquida hipotética','Sem cotação válida']);for(const [key,v] of refs)cells(body,[key,String(v.known),`${v.betterThanCash}/${v.known}`,v.known?`${(v.sumNetPct/v.known).toFixed(2)}%`:'—',String(v.missing)]);table.append(head,body);$('entry-reference-results').append(table);}
  const arms=Object.entries(l?.explorationArms??{});
  if(arms.length){const title=document.createElement('p');title.textContent='Aprendizado das saídas na exploração simulada (retornos líquidos observados; não são previsões garantidas).';const table=document.createElement('table'),head=document.createElement('thead'),body=document.createElement('tbody');cells(head,['Grupo / saída','Vendas avaliadas','Resultado médio líquido','Vendas positivas']);for(const [key,arm] of arms)cells(body,[key,String(arm.trades),`${(arm.sumNetPct/arm.trades).toFixed(2)}%`,`${arm.wins}/${arm.trades}`]);table.append(head,body);$('learning-arms').append(title,table);}
  $('learning-items').replaceChildren();
@@ -460,6 +464,46 @@ function renderLearning(s){
   $('learning-items').append(d);
  }
 }
+let scenarioCache=null,scenarioLoading=false,scenarioRunning=false,scenarioLoadedAt=0;
+const researchAssets=['bitcoin','ethereum','solana','binancecoin','ripple','cardano','chainlink','avalanche-2','polkadot','litecoin'];
+const candidateNames={'train-prior':'Frequência do treino','always-up':'Sempre alta','always-down':'Sempre baixa',momentum:'Último movimento',trend:'Tendência',reversion:'Reversão', 'online-logistic':'Regressão incremental','batch-logistic':'Regressão em lote',neighbors:'Cenários vizinhos','regime-frequency':'Frequência por cenário'};
+function scenarioName(key){return key.split('|').map(x=>({up:'alta',down:'baixa',flat:'lateral',low:'baixa volatilidade',medium:'média volatilidade',high:'alta volatilidade',oversold:'RSI em sobrevenda',neutral:'RSI neutro',overbought:'RSI em sobrecompra'}[x]??x)).join(' / ');}
+const researchPct=value=>Number.isFinite(value)?`${(value*100).toFixed(1)}%`:'—';
+async function loadScenarioReports(){
+ if(scenarioLoading||!connected)return;scenarioLoading=true;
+ try{const data=await request('scenario-report');if(!connected)return;scenarioCache=data;scenarioLoadedAt=Date.now();$('scenario-results').replaceChildren();
+  $('scenario-status').textContent=`${data.studies?.length??0}/10 ativos com estudo. Dez métodos × três prazos × 27 cenários possíveis; cenários sem dados permanecem sem conclusão.`;
+  for(const study of data.studies??[]){const d=document.createElement('details'),summary=document.createElement('summary'),content=document.createElement('div');summary.textContent=`${assetLabel(study.asset)} · dados até ${date(study.report.dataEnd)}`;d.append(summary,content);
+   for(const [h,v] of Object.entries(study.report.horizons??{})){const p=document.createElement('p');p.textContent=`${h}h: ${candidateNames[v.chosen]} escolhido na validação; teste ${v.metrics.correct}/${v.metrics.valid} (${researchPct(v.metrics.accuracy)}). ${v.scenariosObserved}/27 cenários observados. Meta ainda não demonstrada prospectivamente.`;content.append(p);}
+   d.addEventListener('toggle',async()=>{if(!d.open||d.dataset.loaded)return;d.dataset.loaded='true';try{const detail=await request('scenario-report',undefined,true,undefined,{asset:study.asset});if(!connected)return;renderScenarioDetail(content,detail.studies[0].report);}catch(error){content.textContent=error.message;d.dataset.loaded='';}});$('scenario-results').append(d);
+  }
+ }catch(error){$('scenario-status').textContent='Estudos indisponíveis: '+error.message;}
+ finally{scenarioLoading=false;}
+}
+function renderScenarioDetail(container,report){
+ container.replaceChildren();for(const text of report.limitations??[]){const p=document.createElement('p');p.className='muted';p.textContent=text;container.append(p);}
+ for(const [h,v] of Object.entries(report.horizons)){
+  const d=document.createElement('details'),title=document.createElement('summary');title.textContent=`${h}h · escolhido antes do teste: ${candidateNames[v.chosen]}`;d.append(title);
+  const table=document.createElement('table'),head=document.createElement('thead'),body=document.createElement('tbody');cells(head,['Método','Brier da validação','Casos no teste','Acerto no teste','Acerto com confiança ≥70% / participação','Média líquida das compras']);
+  for(const c of v.comparisons){const m=c.test.metrics,selective=c.test.selective,e=c.test.economics;cells(body,[`${candidateNames[c.candidate]}${c.candidate===v.chosen?' · ESCOLHIDO':''}`,Number.isFinite(c.validation.metrics.brier)?c.validation.metrics.brier.toFixed(3):'—',`${m.correct}/${m.valid} (${m.missing} ausentes)`,researchPct(m.accuracy),`${researchPct(selective.accuracy)} / ${researchPct(selective.participation)} · ${selective.valid} casos`,e.buyCases?`${e.meanNetPct.toFixed(3)}% · ${e.buyCases} compras`:'Sem compras']);}
+  table.append(head,body);const scroll=document.createElement('div');scroll.className='table-scroll';scroll.append(table);d.append(scroll);
+  const priorities=document.createElement('p');priorities.textContent='Prioridades para pesquisa futura (não escolhem o vencedor deste teste): '+(v.learningPriorities??[]).map(r=>`${scenarioName(r.scenario)}: ${r.errors} erros em ${r.cases} casos`).join('; ');d.append(priorities);
+  const reasons=document.createElement('p');reasons.textContent='Meta de 80%: '+v.goal.reasons.join('; ')+'. A taxa principal usa todos os casos, não apenas os de maior confiança.';d.append(reasons);
+  const regimes=document.createElement('details'),regimeTitle=document.createElement('summary'),regimeTable=document.createElement('table'),regimeHead=document.createElement('thead'),regimeBody=document.createElement('tbody');regimeTitle.textContent='Cenários do método escolhido';cells(regimeHead,['Tendência / volatilidade / RSI','Casos válidos','Acerto','Falsas altas / falsas baixas']);for(const r of v.championTest.scenarios)cells(regimeBody,[r.scenario.split('|').map(x=>({up:'alta',down:'baixa',flat:'lateral',low:'baixa volatilidade',medium:'média volatilidade',high:'alta volatilidade',oversold:'RSI em sobrevenda',neutral:'RSI neutro',overbought:'RSI em sobrecompra'}[x]??x)).join(' / '),String(r.valid),r.valid?researchPct(r.accuracy):'Sem dados',`${r.fp}/${r.fn}`]);regimeTable.append(regimeHead,regimeBody);const regimeScroll=document.createElement('div');regimeScroll.className='table-scroll';regimeScroll.append(regimeTable);regimes.append(regimeTitle,regimeScroll);d.append(regimes);container.append(d);
+ }
+}
+function renderScenarioLive(s){
+ const summaries=s.intelligence?.scenarioLive?.summary??[],known=summaries.reduce((n,r)=>n+r.metrics.valid,0),met=summaries.filter(r=>r.goal.demonstrated).length;
+ $('scenario-live').textContent=`Confirmação prospectiva: ${known} resultados registrados após a escolha dos métodos; ${met}/${summaries.length} conjuntos de ativo e prazo atingiram os critérios empíricos da meta. Isso não habilita dinheiro real. Os ativos podem ser correlacionados.`;
+ $('scenario-live-table').replaceChildren();if(summaries.length){const table=document.createElement('table'),head=document.createElement('thead'),body=document.createElement('tbody');cells(head,['Ativo','Prazo','Acertos / válidas','Acerto','Cobertura','Meta empírica']);for(const v of summaries)cells(body,[assetLabel(v.asset),v.horizon+'h',`${v.metrics.correct}/${v.metrics.valid}`,researchPct(v.metrics.accuracy),researchPct(v.metrics.coverage),v.goal.demonstrated?'Critérios atingidos no papel':'Em avaliação']);table.append(head,body);$('scenario-live-table').append(table);}
+}
+$('scenario-run-all').addEventListener('click',async()=>{
+ if(scenarioRunning)return;scenarioRunning=true;const button=$('scenario-run-all');button.disabled=true;let count=0;const failed=[];
+ try{for(const asset of researchAssets){$('scenario-status').textContent=`Testando ${assetLabel(asset)} (${count+failed.length+1}/10)…`;try{await request('scenario-run',{asset});count++;}catch(error){failed.push(`${assetLabel(asset)}: ${error.message}`);}}
+  scenarioCache=null;await loadScenarioReports();$('scenario-status').textContent+=` Executados: ${count}; pendentes: ${failed.length}.${failed.length?' '+failed.join(' · '):''}`;
+ }finally{scenarioRunning=false;button.disabled=false;}
+});
+
 $('prediction-horizon').addEventListener('change',()=>{if(currentViewState)renderPredictions(currentViewState);});
 $('train-history').addEventListener('click',async()=>{if(!currentViewState)return;const ids=Object.keys(currentViewState.config?.allocations??{}).filter(id=>catalogue.find(a=>a.id===id)?.market!=='b3');$('train-history').disabled=true;let trained=0;const failed=[];for(const asset of ids){$('training-status').textContent=`Importando ${trained+failed.length+1}/${ids.length}: ${assetLabel(asset)}…`;try{const result=await request('history-train',{asset});render(result);trained++;}catch(e){failed.push(assetLabel(asset));if(e.status===429){failed.push('demais ativos adiados pelo limite do provedor');break;}}}$('training-status').textContent=`${trained} ativos com histórico importado e teste cronológico concluído.${failed.length?' Sem fonte válida: '+failed.join(', '):''}`;$('train-history').disabled=false;});
 

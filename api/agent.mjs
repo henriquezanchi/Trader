@@ -1,3 +1,5 @@
+import { runScenarioStudy, STUDY_PROTOCOL } from '../lib/scenario-study.mjs';
+import { ENTRY_POLICY } from '../lib/entry-learning.mjs';
 import { setExploration } from '../lib/exploration.mjs';
 import { randomUUID } from 'node:crypto';
 import { forecastReadiness, READINESS_POLICY } from '../lib/forecast-assessment.mjs';
@@ -27,12 +29,25 @@ export default async function handler(req, res) {
     catch (error) { return res.status(error.status ?? 503).json({ error: error.status ? error.message : 'Serviço de acesso indisponível' }); }
     if (req.method !== 'GET' && !sameOrigin(req)) return res.status(403).json({ error: 'Origem da solicitação inválida' });
   }
-  if (!['status', 'tick', 'pause', 'resume', 'configure', 'audit', 'bootstrap', 'opportunities', 'preview', 'confirm', 'research', 'research-refresh', 'capital-upgrade', 'markets', 'fast-preview', 'fast-confirm', 'schedule-sale', 'history-train', 'quality', 'chart', 'chart-cycle', 'simulation-exploration'].includes(action)) return res.status(400).json({ error: 'Ação desconhecida' });
-  if (req.method !== (['status', 'audit', 'opportunities', 'research', 'markets', 'quality', 'chart', 'chart-cycle'].includes(action) ? 'GET' : 'POST')) return res.status(405).json({ error: 'Método não permitido' });
+  if (!['status', 'tick', 'pause', 'resume', 'configure', 'audit', 'bootstrap', 'opportunities', 'preview', 'confirm', 'research', 'research-refresh', 'capital-upgrade', 'markets', 'fast-preview', 'fast-confirm', 'schedule-sale', 'history-train', 'quality', 'chart', 'chart-cycle', 'simulation-exploration', 'scenario-run', 'scenario-report', 'learning-start'].includes(action)) return res.status(400).json({ error: 'Ação desconhecida' });
+  if (req.method !== (['status', 'audit', 'opportunities', 'research', 'markets', 'quality', 'chart', 'chart-cycle', 'scenario-report'].includes(action) ? 'GET' : 'POST')) return res.status(405).json({ error: 'Método não permitido' });
   try {
     const repo = repository();
     const commit = repo.commit;
     repo.commit = (version, state) => commit(version, { ...state, lastMutation: { actor: scheduler ? 'scheduler' : 'user', userId, action, at: new Date().toISOString() } });
+    if(action==='scenario-report'){
+      const asset=new URL(req.url,'https://local.invalid').searchParams.get('asset');
+      if(asset&&!['bitcoin','ethereum','solana','binancecoin','ripple','cardano','chainlink','avalanche-2','polkadot','litecoin'].includes(asset))return res.status(400).json({error:'Ativo sem estudo horário'});
+      return res.status(200).json(await repo.scenarioRead(asset));
+    }
+    if(action==='scenario-run'){
+      const body=await readBody(req),asset=body.asset;
+      if(!['bitcoin','ethereum','solana','binancecoin','ripple','cardano','chainlink','avalanche-2','polkadot','litecoin'].includes(asset))return res.status(400).json({error:'Ativo sem histórico horário'});
+      let dataset=await repo.scenarioDataset(asset)??await repo.trainingData(asset),points=dataset?.observations,source=dataset?.report?.source;
+      if(!points?.length){const latest=await repo.read(),result=await historicalDirection(asset,fetch,Date.now(),latest.state.historySourcePolicy);points=result.points;source=result.report.source;}
+      const study=runScenarioStudy(points,asset,{source}),id=await repo.scenarioSave(asset,study,points);
+      return res.status(200).json({id,summary:study.report.summary});
+    }
     if(action==='chart'){
       const period=new URL(req.url,'https://local.invalid').searchParams.get('period')??'1d';
       if(!['1h','1d','1w','1m','1y','5y'].includes(period))return res.status(400).json({error:'Prazo inválido'});
@@ -73,6 +88,17 @@ export default async function handler(req, res) {
     }
     if(action==='markets')return res.status(200).json({quotes:await getETFs(ETF_IDS)});
     const { version, state } = await repo.read();
+    if(action==='learning-start'){
+      if(!state.config)return res.status(400).json({error:'Configure a carteira primeiro'});
+      const body=await readBody(req),pct=body.explorationPct??ENTRY_POLICY.explorationPct;
+      if(!Number.isFinite(pct)||pct<1||pct>100)return res.status(400).json({error:'Parcela de exploração deve ser de 1 a 100%'});
+      if(state.config.learningPolicy!==ENTRY_POLICY.id&&state.fast)state.fast.lastSlot=null;
+      state.config.learningPolicy=ENTRY_POLICY.id;state.config.learningExplorationPct=pct;
+      state.learningGoal={protocol:STUDY_PROTOCOL.id,targetAccuracy:.8,realTradingEnabled:false,createdAt:new Date().toISOString()};
+      state.events=[...state.events,{id:randomUUID(),at:new Date().toISOString(),mode:'control',action:'CONFIGURAR',reason:`Aprendizado de entrada ativado: ${pct}% para testar; restante reservado para estratégias com vantagem líquida demonstrada contra caixa. Meta de pesquisa: 80% de acerto, sem habilitar dinheiro real.`,fee:0,equity:equity(state),parameters:{policy:ENTRY_POLICY,explorationPct:pct}}].slice(-200);
+      await repo.commit(version,state);
+      return res.status(200).json({state,version:version+1,assets:ASSETS,profiles:PROFILES,limits:LIMITS});
+    }
     if(action==='simulation-exploration'){
       const body=await readBody(req);let next;
       try{next=setExploration(state,body.enabled);}catch(error){return res.status(400).json({error:error.message});}

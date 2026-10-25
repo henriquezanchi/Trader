@@ -25,3 +25,10 @@ test('RSS rejeita entidades e datas futuras; indisponibilidade não inventa not�
  const n=parseNews(xml(now-hour),NEWS_SOURCES[0],now);assert.equal(n.length,1);assert.equal(n[0].firstSeenAt,new Date(now).toISOString());
  const failed=await collectNews(null,async()=>{throw Error('offline')},now);assert.equal(failed.items.length,0);assert.ok(failed.sources.every(s=>s.status!=='ok'));
 });
+
+test('modelo de pesquisa também rejeita preço observado antes do alvo e não treina banco direcional legado',()=>{
+ const a=fixture(),first=advanceResearch(null,a.state,a.quotes,news,now),later=fixture(now+hour);
+ for(const q of Object.values(later.quotes))q.observedAt=new Date(now+hour-1000).toISOString();
+ const early=advanceResearch(first.research,later.state,later.quotes,news,now+hour);
+ assert.equal(early.research.models[1].trained,0);assert.ok(early.research.pending.some(p=>p.horizon===1&&p.knownAt===new Date(now).toISOString()));
+});
