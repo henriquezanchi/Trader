@@ -20,9 +20,9 @@ test('regra de seleção só olha a probabilidade; resultado ausente não desapa
 test('auditoria do mesmo histórico preserva modelos online, pendentes, saldo e pausa',()=>{
  const points=Array.from({length:400},(_,i)=>({at:new Date(now-(399-i)*3600000).toISOString(),price:100+i*.02+Math.sin(i/6)*2}));
  const fitted=fitHistoricalDirection(points,'bitcoin',now);let s=structuredClone(applyHistoricalDirection(initialState(1000),fitted,now).state);
- delete s.intelligence.history.bitcoin.protocolMetrics[1].economics;
+ delete s.intelligence.history.bitcoin.protocolMetrics[1].economics.returnForecast;
  s.intelligence.directionByAsset.bitcoin[1].weights[0]=4;s.intelligence.directionPending=[{id:'keep'}];s.paused=true;
  const before=structuredClone(s),result=applyHistoricalDirection(s,fitted,now);
  assert.equal(result.duplicate,false);assert.equal(result.state.cash,before.cash);assert.equal(result.state.paused,true);assert.deepEqual(result.state.intelligence.directionByAsset,before.intelligence.directionByAsset);assert.deepEqual(result.state.intelligence.directionPending,before.intelligence.directionPending);
- assert.equal(result.state.intelligence.history.bitcoin.protocolMetrics[1].economics.protocol,'hourly-direction-cost-audit-v1');assert.equal(applyHistoricalDirection(result.state,fitted,now).duplicate,true);
+ assert.equal(result.state.intelligence.history.bitcoin.protocolMetrics[1].economics.protocol,'hourly-direction-cost-audit-v2');assert.equal(applyHistoricalDirection(result.state,fitted,now).duplicate,true);
 });
