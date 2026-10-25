@@ -49,9 +49,9 @@ export default async function handler(req, res) {
     if(action==='history-train'){
       const body=await readBody(req);let trained;
       try{
-        const cached=await repo.trainingData(body.asset),current=await repo.read();
+        const cached=await repo.trainingData(body.asset);
         if(cached?.observations?.length>=120&&Date.now()-Date.parse(cached.report?.importedAt)<24*3600000){trained=fitHistoricalDirection(cached.observations,body.asset);trained.report.source=cached.report.source;trained.report.dataFetchedAt=cached.report.dataFetchedAt??cached.report.importedAt;trained.report.reusedDataset=true;}
-        else trained=await historicalDirection(body.asset,fetch,Date.now(),current.state.historySourcePolicy??current.state.intelligence?.historySourcePolicy);
+        else{const current=await repo.read();trained=await historicalDirection(body.asset,fetch,Date.now(),current.state.historySourcePolicy??current.state.intelligence?.historySourcePolicy);}
       }catch(error){
         if(error.coinGeckoNotBefore){await rememberHistoryBackoff(repo,error.coinGeckoNotBefore);res.setHeader('Retry-After',String(Math.max(1,Math.ceil((Date.parse(error.coinGeckoNotBefore)-Date.now())/1000))));}
         return res.status(error.coinGeckoNotBefore?429:503).json({error:error.message});
