@@ -98,11 +98,16 @@ test('pesquisa privada: trigger atômico, versão concorrente e paginação', as
 test('relatório de qualidade é privado e não desconta taxas duas vezes do resultado líquido',async()=>{
  const db=new PGlite();try{
  await db.exec('create role anon;create role authenticated;create role service_role bypassrls;');
- for(const name of ['001_trade_lab.sql','002_audit.sql','003_research.sql','004_prediction_quality.sql'])await db.exec(await readFile(new URL('../supabase/'+name,import.meta.url),'utf8'));
+ for(const name of ['001_trade_lab.sql','002_audit.sql','003_research.sql','004_prediction_quality.sql','005_training_lookup_index.sql'])await db.exec(await readFile(new URL('../supabase/'+name,import.meta.url),'utf8'));
  for(const role of ['anon','authenticated']){await db.exec('set role '+role);await assert.rejects(db.query('select public.trade_lab_quality_read()'),/permission denied/);await assert.rejects(db.query("select public.trade_lab_training_data_read('bitcoin')"),/permission denied/);await db.exec('reset role');}
  const s=initialState(1000);s.events=[{id:'buy',at:'2026-10-24T12:00:00Z',mode:'fast',asset:'solana:fixture',action:'COMPRAR',fee:.1},{id:'sell',at:'2026-10-24T13:00:00Z',mode:'fast',asset:'solana:fixture',action:'VENDER',fee:.2,realizedPnl:-2}];
  s.researchDelta={directionCycle:{newPredictions:[{id:'p',horizon:1}],outcomes:[{id:'p',horizon:1,status:'scored',targetAt:'2026-10-24T13:00:00Z',actualObservedAt:'2026-10-24T12:59:00Z'}]}};
  await db.query('select public.trade_lab_commit(0,$1::jsonb)',[JSON.stringify(s)]);await db.exec('set role service_role');const report=(await db.query('select public.trade_lab_quality_read() as report')).rows[0].report;
  assert.equal(report.trading[0].realized_net,-2);assert.equal(report.trading[0].fees,.3);assert.equal(report.evaluation[0].price_before_target,1);assert.equal(report.issuance[0].fingerprinted,0);
+ await db.exec('reset role');
+ for(const [asset,version] of [['solana',101],['bitcoin',102],['solana',103]])await db.query('insert into trade_lab.research_cycles(state_version,data) values($1,$2::jsonb)',[version,JSON.stringify({historyTraining:{report:{asset},observations:[version]}})]);
+ await db.exec('set role service_role');
+ assert.deepEqual((await db.query("select public.trade_lab_training_data_read('solana') as result")).rows[0].result.observations,[103]);
+ assert.deepEqual((await db.query("select public.trade_lab_training_data_read('bitcoin') as result")).rows[0].result.observations,[102]);
  }finally{await db.close();}
 });
