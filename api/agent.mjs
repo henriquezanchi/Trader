@@ -1,3 +1,4 @@
+import { forecastReadiness, READINESS_POLICY } from '../lib/forecast-assessment.mjs';
 import { auditForecast, PREDICTION_PROTOCOL } from '../lib/prediction-protocol.mjs';
 import { historicalDirection, commitHistoricalDirection, fitHistoricalDirection, rememberHistoryBackoff } from '../lib/forecast-history.mjs';
 import { fastSalePreview, fastSaleConfirm, scheduleSale } from '../lib/fast-control.mjs';
@@ -32,7 +33,8 @@ export default async function handler(req, res) {
     repo.commit = (version, state) => commit(version, { ...state, lastMutation: { actor: scheduler ? 'scheduler' : 'user', userId, action, at: new Date().toISOString() } });
     if(action==='quality'){
       const report=await repo.quality(),{state}=await repo.read(),pending=state.intelligence?.directionPending??[],checked=pending.filter(p=>p.protocolId===PREDICTION_PROTOCOL.id).map(auditForecast);
-      return res.status(200).json({...report,replay:{protocol:PREDICTION_PROTOCOL.id,checked:checked.length,valid:checked.filter(p=>p.valid).length,invalid:checked.filter(p=>!p.valid),legacyUnfingerprinted:pending.length-checked.length}});
+      const forecastAssessment=Object.keys(state.intelligence?.history??{}).flatMap(id=>[1,6,24].map(h=>forecastReadiness(state,id,h)));
+      return res.status(200).json({...report,forecastAssessment,readinessPolicy:READINESS_POLICY,replay:{protocol:PREDICTION_PROTOCOL.id,checked:checked.length,valid:checked.filter(p=>p.valid).length,invalid:checked.filter(p=>!p.valid),legacyUnfingerprinted:pending.length-checked.length}});
     }
     if (action === 'audit' || action === 'research') {
       const raw = new URL(req.url, 'https://local.invalid').searchParams.get('before');
