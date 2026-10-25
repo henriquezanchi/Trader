@@ -25,3 +25,10 @@ test('alternativas são selecionadas por resultados anteriores, com exploração
  const context={family:'major-crypto'},s={learning:{explorationArms:{'major-crypto|short':{trades:10,sumReward:5},'major-crypto|medium':{trades:10,sumReward:-5},'major-crypto|patient':{trades:10,sumReward:-5}}}};
  assert.equal(explorationPlan(s,context,{}).explorationArm,'short');delete s.learning.explorationArms['major-crypto|medium'];assert.equal(explorationPlan(s,context,{}).explorationArm,'medium');
 });
+
+test('exploração remove filtro de idade e atividade de pool mas exige reserva e preço válidos',()=>{
+ const s=setExploration(state(),true,now),id='solana:'+'A'.repeat(32);s.config.discoveryPct=15;s.discovery={liveIds:[id]};
+ const q={...quotes(),[id]:{price:1,observedAt:new Date(now).toISOString(),source:'geckoterminal-indicative',liquidityBRL:10000,liquidityUSD:2000,createdAt:new Date(now-120*60000).toISOString(),volume5mUSD:0,buys5m:0,sells5m:0}};
+ const result=fastStep(s,q,now).state;assert.ok(result.fast.positions[id].quantity>0);assert.ok(result.cash>=0);
+ const invalid=structuredClone(q);invalid[id].liquidityBRL=0;assert.equal(fastStep(s,invalid,now).state.fast.positions[id].quantity,0);
+});
