@@ -15,3 +15,10 @@ fieldset{border:0;margin:0;padding:0;min-width:0}fieldset:disabled{opacity:.65}.
 #diary-latest { display: block; }
 #events summary { cursor: pointer; white-space: nowrap; }
 #events pre { max-width: 34rem; max-height: 26rem; overflow: auto; white-space: pre-wrap; }
+
+#events tr.decision-action{--decision-color:#a8c9ff;background:#1c2630}
+#events tr.decision-buy{--decision-color:#b1ef82;background:#1e2b20}
+#events tr.decision-sell{--decision-color:#ffcc96;background:#30271e}
+#events tr.decision-action td:first-child{border-left:3px solid var(--decision-color)}
+#events .decision-badge{display:inline-block;color:var(--decision-color);font-weight:750;border:1px solid currentColor;border-radius:5px;padding:5px 8px}
+#events tr.decision-action.selected-cycle{background:#2b4223}

@@ -341,6 +341,11 @@ function renderJournal(events){
   for (const event of [...events].reverse()) {
     const symbol = event.action==='APORTE'?'':event.assetSymbol??assetLabel(event.asset??'bitcoin');
     const row=cells($('events'), [date(event.at), `${symbol} · ${event.action}${event.mode==='fast'?' · CURTO':event.mode==='assisted'?' · ASSISTIDO':event.mode==='core'?' · CENÁRIO':event.mode==='data'?' · DADOS':''}`, '', money(event.fee??0), money(event.equity)]);
+    const action=event.action??'';
+    row.classList.add(action==='AGUARDAR'?'decision-wait':'decision-action');
+    if(action==='COMPRAR')row.classList.add('decision-buy');
+    else if(action==='VENDER')row.classList.add('decision-sell');
+    if(action!=='AGUARDAR'){const badge=document.createElement('span');badge.className='decision-badge';badge.textContent=row.children[1].textContent;row.children[1].replaceChildren(badge);}
     row.dataset.cycle=new Date(event.at).toISOString();row.dataset.eventId=event.id??`${event.at}:${event.asset}:${event.action}`;if(event.at===selectedCycle)row.classList.add('selected-cycle');
     const detail=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Ver decisão';detail.append(summary);
     detail.addEventListener('toggle',()=>{if(detail.open&&!detail.dataset.loaded){detail.dataset.loaded='true';const reason=document.createElement('p'),pre=document.createElement('pre');reason.textContent=event.reason;pre.textContent=JSON.stringify({parameters:event.parameters,indicators:event.indicators,quote:event.quote,before:event.before,after:event.after,learning:event.learning,realizedPnl:event.realizedPnl},null,2);detail.append(reason,pre);}});
