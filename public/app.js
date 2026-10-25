@@ -338,23 +338,31 @@ function renderFast(s){
 function renderJournal(events){
   const openReports=new Set([...$('events').children].filter(row=>row.querySelector('details')?.open).map(row=>row.dataset.eventId)),selectedCycle=[...$('events').children].find(row=>row.classList.contains('selected-cycle'))?.dataset.cycle;
   $('events').replaceChildren();
-  for (const event of [...events].reverse()) {
+  for (const event of [...events].reverse().sort((a,b)=>Date.parse(b.at)-Date.parse(a.at))) {
     const symbol = event.action==='APORTE'?'':event.assetSymbol??assetLabel(event.asset??'bitcoin');
     const row=cells($('events'), [date(event.at), `${symbol} · ${event.action}${event.mode==='fast'?' · CURTO':event.mode==='assisted'?' · ASSISTIDO':event.mode==='core'?' · CENÁRIO':event.mode==='data'?' · DADOS':''}`, '', money(event.fee??0), money(event.equity)]);
-    const action=event.action??'';
+    const action=event.action??'';row.dataset.action=action;
     row.classList.add(action==='AGUARDAR'?'decision-wait':'decision-action');
     if(action==='COMPRAR')row.classList.add('decision-buy');
     else if(action==='VENDER')row.classList.add('decision-sell');
     if(action!=='AGUARDAR'){const badge=document.createElement('span');badge.className='decision-badge';badge.textContent=row.children[1].textContent;row.children[1].replaceChildren(badge);}
-    row.dataset.cycle=new Date(event.at).toISOString();row.dataset.eventId=event.id??`${event.at}:${event.asset}:${event.action}`;if(event.at===selectedCycle)row.classList.add('selected-cycle');
+    row.dataset.cycle=new Date(event.at).toISOString();row.dataset.eventId=event.id??`${event.at}:${event.asset}:${event.action}`;if(row.dataset.cycle===selectedCycle)row.classList.add('selected-cycle');
     const detail=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Ver decisão';detail.append(summary);
     detail.addEventListener('toggle',()=>{if(detail.open&&!detail.dataset.loaded){detail.dataset.loaded='true';const reason=document.createElement('p'),pre=document.createElement('pre');reason.textContent=event.reason;pre.textContent=JSON.stringify({parameters:event.parameters,indicators:event.indicators,quote:event.quote,before:event.before,after:event.after,learning:event.learning,realizedPnl:event.realizedPnl},null,2);detail.append(reason,pre);}});
     row.children[2].append(detail);if(openReports.has(row.dataset.eventId))detail.open=true;
   }
+  filterJournal();
 }
+function filterJournal(){
+ const filter=$('journal-filter').value,rows=[...$('events').children];let visible=0;
+ for(const row of rows){const action=row.dataset.action;row.hidden=!(filter==='all'||filter==='actions'&&action!=='AGUARDAR'||filter==='buy'&&action==='COMPRAR'||filter==='sell'&&action==='VENDER');visible+=Number(!row.hidden);}
+ $('journal-filter-status').textContent=`${visible} de ${rows.length} decisões exibidas.${visible?'':' Nenhuma decisão neste filtro.'}`;
+}
+$('journal-filter').addEventListener('change',filterJournal);
 function openCycle(at,events){
  at=new Date(at).toISOString();
  $('decisions-log').open=true;
+ $('journal-filter').value='all';filterJournal();
  const rows=[...$('events').children];for(const row of rows)row.classList.toggle('selected-cycle',row.dataset.cycle===at);
  const selected=rows.find(row=>row.dataset.cycle===at);selected?.scrollIntoView({behavior:'smooth',block:'center'});
  selected?.querySelector('summary')?.focus({preventScroll:true});
