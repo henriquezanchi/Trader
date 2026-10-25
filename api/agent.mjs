@@ -38,7 +38,8 @@ export default async function handler(req, res) {
     if(action==='scenario-report'){
       const asset=new URL(req.url,'https://local.invalid').searchParams.get('asset');
       if(asset&&!['bitcoin','ethereum','solana','binancecoin','ripple','cardano','chainlink','avalanche-2','polkadot','litecoin'].includes(asset))return res.status(400).json({error:'Ativo sem estudo horário'});
-      return res.status(200).json(await repo.scenarioRead(asset));
+      const protocol=new URL(req.url,'https://local.invalid').searchParams.get('protocol');if(protocol&&!['scenario-comparison-v1','scenario-comparison-v2'].includes(protocol))return res.status(400).json({error:'Versão de estudo inválida'});
+      return res.status(200).json(await repo.scenarioRead(asset,protocol));
     }
     if(action==='scenario-run'){
       const body=await readBody(req),asset=body.asset;

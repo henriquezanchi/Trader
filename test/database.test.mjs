@@ -129,13 +129,14 @@ test('gráfico persistente: prazos, amostragem, ciclo original e acesso privado'
 test('estudos comparativos são privados, imutáveis e não alteram saldo',async()=>{
  const db=new PGlite();try{
  await db.exec('create role anon;create role authenticated;create role service_role bypassrls;');
- for(const name of ['001_trade_lab.sql','008_scenario_studies.sql'])await db.exec(await readFile(new URL('../supabase/'+name,import.meta.url),'utf8'));
+ for(const name of ['001_trade_lab.sql','008_scenario_studies.sql','009_scenario_versions.sql'])await db.exec(await readFile(new URL('../supabase/'+name,import.meta.url),'utf8'));
  for(const role of ['anon','authenticated']){await db.exec('set role '+role);await assert.rejects(db.query('select public.trade_lab_scenario_read(null)'),/permission denied/);await assert.rejects(db.query('select public.trade_lab_scenario_models()'),/permission denied/);await db.exec('reset role');}
  const before=(await db.query('select payload from trade_lab.state')).rows[0].payload;
  await db.exec('set role service_role');const report={asset:'bitcoin',protocol:{id:'scenario-comparison-v1'},datasetHash:'synthetic',summary:{asset:'bitcoin'}},points=Array.from({length:120},()=>({}));
  const save=async models=>(await db.query('select public.trade_lab_scenario_save($1,$2::jsonb,$3::jsonb,$4::jsonb) as id',['bitcoin',JSON.stringify(report),JSON.stringify(models),JSON.stringify(points)])).rows[0].id;
  const id=await save({1:{hash:'original'}});assert.equal(await save({1:{hash:'changed'}}),id);
- const models=(await db.query('select public.trade_lab_scenario_models() as m')).rows[0].m;assert.equal(models[0].models[1].hash,'original');await assert.rejects(db.query('delete from trade_lab.scenario_studies'),/permission denied/);
+ const models=(await db.query('select public.trade_lab_scenario_models() as m')).rows[0].m;assert.equal(models[0].models[1].hash,'original');
+ report.protocol.id='scenario-comparison-v2';const next=await save({1:{hash:'v2'}});assert.notEqual(next,id);const prior=(await db.query("select public.trade_lab_scenario_version('bitcoin','scenario-comparison-v1') as s")).rows[0].s;assert.equal(prior.studies[0].id,id);await assert.rejects(db.query('delete from trade_lab.scenario_studies'),/permission denied/);
  await db.exec('reset role');assert.deepEqual((await db.query('select payload from trade_lab.state')).rows[0].payload,before);
  }finally{await db.close();}
 });

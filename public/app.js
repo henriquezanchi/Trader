@@ -18,7 +18,7 @@ async function request(action = 'status', body, retry = true, before, query = {}
   return data;
 }
 function showLogin() {
-  connected = false; version = null; dirty = false; chartCache=null; chartRequestId++; chartLoading=false; scenarioCache=null;
+  connected = false; version = null; dirty = false; chartCache=null; chartRequestId++; chartLoading=false; scenarioCache=null;scenarioRequestId++;scenarioLoading=false;
   $('dashboard').hidden = true; $('audit-panel').hidden = true; $('audit-entries').replaceChildren(); $('reset-panel').hidden = true; $('login').hidden = false;
   clearProposal(); $('assist-enabled').checked = false; $('assist-opportunities').replaceChildren(); $('research-entries').replaceChildren();
   $('password').value = ''; $('new-password').value = ''; $('confirm-password').value = '';
@@ -464,21 +464,21 @@ function renderLearning(s){
   $('learning-items').append(d);
  }
 }
-let scenarioCache=null,scenarioLoading=false,scenarioRunning=false,scenarioLoadedAt=0;
+let scenarioCache=null,scenarioLoading=false,scenarioRunning=false,scenarioLoadedAt=0,scenarioRequestId=0;
 const researchAssets=['bitcoin','ethereum','solana','binancecoin','ripple','cardano','chainlink','avalanche-2','polkadot','litecoin'];
-const candidateNames={'train-prior':'Frequência do treino','always-up':'Sempre alta','always-down':'Sempre baixa',momentum:'Último movimento',trend:'Tendência',reversion:'Reversão', 'online-logistic':'Regressão incremental','batch-logistic':'Regressão em lote',neighbors:'Cenários vizinhos','regime-frequency':'Frequência por cenário'};
+const candidateNames={'train-prior':'Frequência do treino','always-up':'Sempre alta','always-down':'Sempre baixa',momentum:'Último movimento',trend:'Tendência',reversion:'Reversão', 'online-logistic':'Regressão incremental','batch-logistic':'Regressão em lote',neighbors:'Cenários vizinhos','regime-frequency':'Frequência por cenário','batch-context':'Regressão com contexto','neighbors-context':'Vizinhos com contexto','ensemble-context':'Combinação de contexto'};
 function scenarioName(key){return key.split('|').map(x=>({up:'alta',down:'baixa',flat:'lateral',low:'baixa volatilidade',medium:'média volatilidade',high:'alta volatilidade',oversold:'RSI em sobrevenda',neutral:'RSI neutro',overbought:'RSI em sobrecompra'}[x]??x)).join(' / ');}
 const researchPct=value=>Number.isFinite(value)?`${(value*100).toFixed(1)}%`:'—';
-async function loadScenarioReports(){
- if(scenarioLoading||!connected)return;scenarioLoading=true;
- try{const data=await request('scenario-report');if(!connected)return;scenarioCache=data;scenarioLoadedAt=Date.now();$('scenario-results').replaceChildren();
-  $('scenario-status').textContent=`${data.studies?.length??0}/10 ativos com estudo. Dez métodos × três prazos × 27 cenários possíveis; cenários sem dados permanecem sem conclusão.`;
-  for(const study of data.studies??[]){const d=document.createElement('details'),summary=document.createElement('summary'),content=document.createElement('div');summary.textContent=`${assetLabel(study.asset)} · dados até ${date(study.report.dataEnd)}`;d.append(summary,content);
+async function loadScenarioReports(force=false){
+ if(!connected||scenarioLoading&&!force)return;const token=++scenarioRequestId;scenarioLoading=true;
+ try{const version=$('scenario-version').value,data=await request('scenario-report',undefined,true,undefined,version?{protocol:version}:{});if(!connected||token!==scenarioRequestId)return;scenarioCache=data;scenarioLoadedAt=Date.now();$('scenario-results').replaceChildren();
+  $('scenario-status').textContent=`${data.studies?.length??0}/10 ativos com estudo. ${Math.max(0,...(data.studies??[]).map(s=>s.report.candidateCount??10))} métodos × três prazos × 27 cenários possíveis; cenários sem dados permanecem sem conclusão.`;
+  for(const study of data.studies??[]){const d=document.createElement('details'),summary=document.createElement('summary'),content=document.createElement('div');summary.textContent=`${assetLabel(study.asset)} · ${study.report.protocol} · dados até ${date(study.report.dataEnd)}`;d.append(summary,content);
    for(const [h,v] of Object.entries(study.report.horizons??{})){const p=document.createElement('p');p.textContent=`${h}h: ${candidateNames[v.chosen]} escolhido na validação; teste ${v.metrics.correct}/${v.metrics.valid} (${researchPct(v.metrics.accuracy)}). ${v.scenariosObserved}/27 cenários observados. Meta ainda não demonstrada prospectivamente.`;content.append(p);}
-   d.addEventListener('toggle',async()=>{if(!d.open||d.dataset.loaded)return;d.dataset.loaded='true';try{const detail=await request('scenario-report',undefined,true,undefined,{asset:study.asset});if(!connected)return;renderScenarioDetail(content,detail.studies[0].report);}catch(error){content.textContent=error.message;d.dataset.loaded='';}});$('scenario-results').append(d);
+   d.addEventListener('toggle',async()=>{if(!d.open||d.dataset.loaded)return;d.dataset.loaded='true';try{const detail=await request('scenario-report',undefined,true,undefined,{asset:study.asset,protocol:study.report.protocol});if(!connected)return;renderScenarioDetail(content,detail.studies[0].report);}catch(error){content.textContent=error.message;d.dataset.loaded='';}});$('scenario-results').append(d);
   }
- }catch(error){$('scenario-status').textContent='Estudos indisponíveis: '+error.message;}
- finally{scenarioLoading=false;}
+ }catch(error){if(token===scenarioRequestId)$('scenario-status').textContent='Estudos indisponíveis: '+error.message;}
+ finally{if(token===scenarioRequestId)scenarioLoading=false;}
 }
 function renderScenarioDetail(container,report){
  container.replaceChildren();for(const text of report.limitations??[]){const p=document.createElement('p');p.className='muted';p.textContent=text;container.append(p);}
@@ -495,12 +495,13 @@ function renderScenarioDetail(container,report){
 function renderScenarioLive(s){
  const summaries=s.intelligence?.scenarioLive?.summary??[],known=summaries.reduce((n,r)=>n+r.metrics.valid,0),met=summaries.filter(r=>r.goal.demonstrated).length;
  $('scenario-live').textContent=`Confirmação prospectiva: ${known} resultados registrados após a escolha dos métodos; ${met}/${summaries.length} conjuntos de ativo e prazo atingiram os critérios empíricos da meta. Isso não habilita dinheiro real. Os ativos podem ser correlacionados.`;
- $('scenario-live-table').replaceChildren();if(summaries.length){const table=document.createElement('table'),head=document.createElement('thead'),body=document.createElement('tbody');cells(head,['Ativo','Prazo','Acertos / válidas','Acerto','Cobertura','Meta empírica']);for(const v of summaries)cells(body,[assetLabel(v.asset),v.horizon+'h',`${v.metrics.correct}/${v.metrics.valid}`,researchPct(v.metrics.accuracy),researchPct(v.metrics.coverage),v.goal.demonstrated?'Critérios atingidos no papel':'Em avaliação']);table.append(head,body);$('scenario-live-table').append(table);}
+ $('scenario-live-table').replaceChildren();if(summaries.length){const table=document.createElement('table'),head=document.createElement('thead'),body=document.createElement('tbody');cells(head,['Ativo','Versão','Prazo','Acertos / válidas','Acerto','Cobertura','Referência nos mesmos casos','Meta empírica']);for(const v of summaries)cells(body,[assetLabel(v.asset),v.protocol??'scenario-comparison-v1',v.horizon+'h',`${v.metrics.correct}/${v.metrics.valid}`,researchPct(v.metrics.accuracy),researchPct(v.metrics.coverage),v.paired?.reference?.valid?`${researchPct(v.paired.reference.accuracy)} (${v.paired.reference.valid} casos); candidato ${researchPct(v.paired.challenger.accuracy)}`:'—',v.goal.demonstrated?'Critérios atingidos no papel':'Em avaliação']);table.append(head,body);$('scenario-live-table').append(table);}
 }
+$('scenario-version').addEventListener('change',()=>{scenarioCache=null;loadScenarioReports(true);});
 $('scenario-run-all').addEventListener('click',async()=>{
- if(scenarioRunning)return;scenarioRunning=true;const button=$('scenario-run-all');button.disabled=true;let count=0;const failed=[];
+ if(scenarioRunning)return;$('scenario-version').value='';scenarioRunning=true;const button=$('scenario-run-all');button.disabled=true;let count=0;const failed=[];
  try{for(const asset of researchAssets){$('scenario-status').textContent=`Testando ${assetLabel(asset)} (${count+failed.length+1}/10)…`;try{await request('scenario-run',{asset});count++;}catch(error){failed.push(`${assetLabel(asset)}: ${error.message}`);}}
-  scenarioCache=null;await loadScenarioReports();$('scenario-status').textContent+=` Executados: ${count}; pendentes: ${failed.length}.${failed.length?' '+failed.join(' · '):''}`;
+  scenarioCache=null;await loadScenarioReports(true);$('scenario-status').textContent+=` Executados: ${count}; pendentes: ${failed.length}.${failed.length?' '+failed.join(' · '):''}`;
  }finally{scenarioRunning=false;button.disabled=false;}
 });
 
