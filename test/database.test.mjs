@@ -140,3 +140,21 @@ test('estudos comparativos são privados, imutáveis e não alteram saldo',async
  await db.exec('reset role');assert.deepEqual((await db.query('select payload from trade_lab.state')).rows[0].payload,before);
  }finally{await db.close();}
 });
+
+test('cotações curtas: primeira publicação, leitura privada e ausência de alterações financeiras',async()=>{
+ const db=new PGlite();try{
+ await db.exec('create role anon;create role authenticated;create role service_role bypassrls;');
+ for(const name of ['001_trade_lab.sql','002_audit.sql','008_scenario_studies.sql','009_scenario_versions.sql'])await db.exec(await readFile(new URL('../supabase/'+name,import.meta.url),'utf8'));
+ const stamp=(await db.query("select now()-interval '30 seconds' as at")).rows[0].at.toISOString();
+ const event={id:'q1',at:stamp,mode:'fast',asset:'bitcoin',quote:{price:100,source:'coingecko',observedAt:stamp}};
+ await db.query("insert into trade_lab.audit(state_version,kind,decisions,context) values(100,'cycle',$1::jsonb,'{}')",[JSON.stringify([event])]);
+ const before=(await db.query('select payload from trade_lab.state')).rows[0].payload;
+ await db.exec(await readFile(new URL('../supabase/010_execution_quotes.sql',import.meta.url),'utf8'));
+ event.id='q2';event.quote.price=999;await db.query("insert into trade_lab.audit(state_version,kind,decisions,context) values(101,'cycle',$1::jsonb,'{}')",[JSON.stringify([event])]);
+ for(const role of ['anon','authenticated']){await db.exec('set role '+role);await assert.rejects(db.query("select public.trade_lab_execution_data('bitcoin')"),/permission denied/);await db.exec('reset role');}
+ await db.exec('set role service_role');const points=(await db.query("select public.trade_lab_execution_data('bitcoin') as p")).rows[0].p;assert.equal(points.length,1);assert.equal(points[0].price,100);assert.ok(Date.parse(points[0].at)>=Date.parse(points[0].observedAt));
+ const obs=Array.from({length:120},()=>({}));for(const [protocol,models] of [['scenario-comparison-v2',{1:{hash:'hour'}}],['execution-horizons-v1',{6:{hash:'minute'}}]]){const r={asset:'bitcoin',protocol:{id:protocol},datasetHash:protocol,summary:{protocol}};await db.query('select public.trade_lab_scenario_save($1,$2::jsonb,$3::jsonb,$4::jsonb)',['bitcoin',JSON.stringify(r),JSON.stringify(models),JSON.stringify(obs)]);}
+ assert.equal((await db.query('select public.trade_lab_scenario_models() as m')).rows[0].m[0].models[1].hash,'hour');assert.equal((await db.query('select public.trade_lab_execution_models() as m')).rows[0].m[0].models[6].hash,'minute');
+ await assert.rejects(db.query('select * from trade_lab.quote_observations'),/permission denied/);await db.exec('reset role');assert.deepEqual((await db.query('select payload from trade_lab.state')).rows[0].payload,before);
+ }finally{await db.close();}
+});
