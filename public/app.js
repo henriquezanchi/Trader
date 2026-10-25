@@ -10,15 +10,15 @@ async function authCall(action, body) {
   if (!response.ok) { const error = new Error(data.error ?? 'Não foi possível acessar a conta'); error.status = response.status; throw error; }
   return data;
 }
-async function request(action = 'status', body, retry = true, before) {
-  const response = await fetch(`/api/agent?action=${action}${before ? `&before=${encodeURIComponent(before)}` : ''}`, { method: ['status', 'audit', 'opportunities', 'research', 'quality'].includes(action) ? 'GET' : 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}), cache: 'no-store', signal: AbortSignal.timeout(35000) });
-  if (response.status === 401 && retry) { await authCall('refresh'); return request(action, body, false, before); }
+async function request(action = 'status', body, retry = true, before, query = {}) {
+  const response = await fetch(`/api/agent?action=${action}${before ? `&before=${encodeURIComponent(before)}` : ''}${Object.entries(query).map(([k,v])=>'&'+encodeURIComponent(k)+'='+encodeURIComponent(v)).join('')}`, { method: ['status', 'audit', 'opportunities', 'research', 'quality', 'chart', 'chart-cycle'].includes(action) ? 'GET' : 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}), cache: 'no-store', signal: AbortSignal.timeout(35000) });
+  if (response.status === 401 && retry) { await authCall('refresh'); return request(action, body, false, before, query); }
   const data = await response.json();
   if (!response.ok) { const error = new Error(data.error ?? 'Serviço indisponível'); error.status = response.status; throw error; }
   return data;
 }
 function showLogin() {
-  connected = false; version = null; dirty = false;
+  connected = false; version = null; dirty = false; chartCache=null; chartRequestId++; chartLoading=false;
   $('dashboard').hidden = true; $('audit-panel').hidden = true; $('audit-entries').replaceChildren(); $('reset-panel').hidden = true; $('login').hidden = false;
   clearProposal(); $('assist-enabled').checked = false; $('assist-opportunities').replaceChildren(); $('research-entries').replaceChildren();
   $('password').value = ''; $('new-password').value = ''; $('confirm-password').value = '';
@@ -79,6 +79,8 @@ function render(data) {
   $('last-cycle').textContent = s.lastTick ? date(`${s.lastTick}:00:00Z`) : 'Não executado';
   $('updated').textContent = 'Confira a continuidade da coleta abaixo';
   paused = s.paused;
+  $('exploration-status').textContent=s.config?.simulationExploration?'Exploração simulada ativa: sem limites de perda e exposição, stop de perda ou bloqueios econômicos. Compras usam apenas o caixa virtual. Saídas por alvo, prazo ou sua ordem.':'Simulação com os limites do perfil.';
+  $('exploration-toggle').textContent=s.config?.simulationExploration?'Restaurar limites e pausar':'Ativar exploração simulada';
   $('status').textContent = paused ? 'Pausado' : s.startedAt ? 'Habilitado para ciclos' : 'Simulação habilitada';
   $('pause').textContent = paused ? 'Iniciar / retomar' : 'Pausar';
   $('reason').textContent = `${s.reason}${s.dataStatus?.status==='unavailable'?` · ${s.dataStatus.message} (${date(s.dataStatus.at)})`:''}`;
@@ -107,16 +109,7 @@ function render(data) {
   $('activity-reason').textContent = trades ? 'Veja as decisões e seus motivos no diário abaixo. Taxas e deslizamento contam no resultado e nos limites de perda.' : warming ? 'Sem negociações: a sequência de 24 observações horárias ainda não está completa. Intervalos maiores que 90 minutos interrompem a sequência. Sem posições, o caixa virtual não rende.' : s.paused ? 'A simulação está pausada. Veja os motivos no diário abaixo.' : s.config?.cryptoStrategy==='dca-weekly' ? 'DCA semanal: o ciclo verifica a data do próximo aporte e o teto de 5% em BTC; não é uma estratégia de trade diário.' : 'A janela de dados está completa; o motor aguarda um sinal e respeita os limites configurados.';
   const latestEvent=s.events.at(-1), latestCycle=latestEvent?s.events.filter(e=>e.at===latestEvent.at):[];
   $('diary-latest').textContent=latestEvent?`Último ciclo ${date(latestEvent.at)} · ${latestCycle.length} decisões · mais recente: ${catalogue.find(a=>a.id===latestEvent.asset)?.symbol??'Dados'} ${latestEvent.action}`:'Aguardando primeiro ciclo.';
-  const openReports=new Set([...$('events').children].filter(row=>row.querySelector('details')?.open).map(row=>row.dataset.eventId)),selectedCycle=[...$('events').children].find(row=>row.classList.contains('selected-cycle'))?.dataset.cycle;
-  $('events').replaceChildren();
-  for (const event of [...s.events].reverse()) {
-    const symbol = event.action==='APORTE'?'':event.assetSymbol??assetLabel(event.asset??'bitcoin');
-    const row=cells($('events'), [date(event.at), `${symbol} · ${event.action}${event.mode==='fast'?' · CURTO':event.mode==='assisted'?' · ASSISTIDO':event.mode==='core'?' · CENÁRIO':event.mode==='data'?' · DADOS':''}`, '', money(event.fee??0), money(event.equity)]);
-    row.dataset.cycle=event.at;row.dataset.eventId=event.id??`${event.at}:${event.asset}:${event.action}`;if(event.at===selectedCycle)row.classList.add('selected-cycle');
-    const detail=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Ver decisão';detail.append(summary);
-    detail.addEventListener('toggle',()=>{if(detail.open&&!detail.dataset.loaded){detail.dataset.loaded='true';const reason=document.createElement('p'),pre=document.createElement('pre');reason.textContent=event.reason;pre.textContent=JSON.stringify({parameters:event.parameters,indicators:event.indicators,quote:event.quote,before:event.before,after:event.after,learning:event.learning,realizedPnl:event.realizedPnl},null,2);detail.append(reason,pre);}});
-    row.children[2].append(detail);if(openReports.has(row.dataset.eventId))detail.open=true;
-  }
+  renderJournal(s.events);
   $('empty').textContent = s.events.length ? '' : 'Nenhum ciclo executado ainda.';
   renderChart(s);
 
@@ -140,7 +133,7 @@ $('profile').addEventListener('change', () => { const profile = $('profile').val
 $('settings').addEventListener('submit', event => {
   event.preventDefault();
   if (!paused) { $('message').textContent = 'Pause a simulação antes de salvar a carteira.'; return; }
-  const config = { profile: $('profile').value, cryptoStrategy:$('crypto-strategy').value, allocations: {} };
+  const config = { simulationExploration:currentViewState?.config?.simulationExploration??false, profile: $('profile').value, cryptoStrategy:$('crypto-strategy').value, allocations: {} };
   for (const key of fields) config[key] = Number($(key).value);
   for (const a of catalogue) { const value = Number($(`weight-${a.id}`).value); if (value) config.allocations[a.id] = value; }
   update('configure', { config, expectedVersion: version });
@@ -334,31 +327,64 @@ function renderFast(s){
  const active=s.config?.cryptoStrategy==='active',hybrid=active||s.config?.cryptoStrategy==='hybrid',f=s.fast;
  const type=s.config?.profile.includes('agressivo')?'agressivo':s.config?.profile.includes('conservador')?'conservador':'moderado';
  const blend={conservador:[80,20,.6,.8,1],moderado:[50,50,.5,1,4],agressivo:[30,70,.5,1.2,8]}[type];
- $('fast-status').textContent=active?`Ativo adaptativo ${type}: entradas por liquidez, cenário e evidência acumulada; previsão direcional orienta seleção e saídas antecipadas. Limites da posição são definidos na entrada e preservados. Novos pools compartilham o caixa, com teto de ${s.config.discoveryPct??0}% do capital. Fonte de descoberta: ${s.discovery?.status??'primeira consulta pendente'}.`:hybrid?`Híbrido ${type}: ${blend[0]}% cenário / ${blend[1]}% curto, dentro dos pesos de cripto. Entrada curta até ${blend[4]}% do capital por ativo, limitada ao saldo e exposição. Alvo líquido +${blend[2]}%; perda por posição de referência -${blend[3]}%. ${s.paused?'Simulação pausada.':'Habilitado para ciclos automáticos.'}`:'Escolha Híbrido em Estratégia automática para cripto e salve com a simulação pausada para habilitar as duas velocidades.';
+ $('fast-status').textContent=s.config?.simulationExploration?'Exploração simulada: caixa disponível distribuído entre os ativos elegíveis, sem tetos do perfil nem stops de perda. Saídas curtas, intermediárias e pacientes são comparadas pelo resultado líquido. Pausar interrompe novas entradas.':active?`Ativo adaptativo ${type}: entradas por liquidez, cenário e evidência acumulada; previsão direcional orienta seleção e saídas antecipadas. Limites da posição são definidos na entrada e preservados. Novos pools compartilham o caixa, com teto de ${s.config.discoveryPct??0}% do capital. Fonte de descoberta: ${s.discovery?.status??'primeira consulta pendente'}.`:hybrid?`Híbrido ${type}: ${blend[0]}% cenário / ${blend[1]}% curto, dentro dos pesos de cripto. Entrada curta até ${blend[4]}% do capital por ativo, limitada ao saldo e exposição. Alvo líquido +${blend[2]}%; perda por posição de referência -${blend[3]}%. ${s.paused?'Simulação pausada.':'Habilitado para ciclos automáticos.'}`:'Escolha Híbrido em Estratégia automática para cripto e salve com a simulação pausada para habilitar as duas velocidades.';
  $('fast-cycle').textContent=f?.updatedAt?`Último ciclo curto: ${date(f.updatedAt)}`:'Aguardando primeiro ciclo curto';
  const stats=f?.stats;$('fast-stats').textContent=stats?`${stats.buys} compras · ${stats.sells} vendas · ${stats.wins} saídas positivas / ${stats.losses} negativas · resultado realizado ${money(stats.realizedPnl)} · taxas acumuladas ${money(stats.fees)}. Lucro líquido de trade inclui custos de entrada e saída; impostos de cripto não incluídos.`:'As primeiras entradas exigem cerca de 4–6 minutos de coleta nova e estabilização; esperar também é uma decisão registrada.';
  $('fast-holdings').replaceChildren();
- for(const [id,p] of Object.entries(f?.positions??{}))if(p.quantity>0){const net=p.quantity*p.lastPrice*.999*.999-p.costBasis;const row=cells($('fast-holdings'),[assetLabel(id),`${p.quantity.toFixed(8)} · ${money(p.market==='dex'?(p.liquidationValue??0):p.quantity*p.lastPrice)}${p.market==='dex'?' · saída estimada':''}`,id.startsWith('solana:')?'Consultar prévia: impacto e taxas variáveis':`${money(net)} (${(net/p.costBasis*100).toFixed(2)}%)`,p.userExit?'Programado pelo usuário':`+${p.plan?.takeProfitPct??blend[2]}%`,`-${p.plan?.stopPct??blend[3]}%`,'']);
+ for(const [id,p] of Object.entries(f?.positions??{}))if(p.quantity>0){const net=p.quantity*p.lastPrice*.999*.999-p.costBasis;const row=cells($('fast-holdings'),[assetLabel(id),`${p.quantity.toFixed(8)} · ${money(p.market==='dex'?(p.liquidationValue??0):p.quantity*p.lastPrice)}${p.market==='dex'?' · saída estimada':''}`,id.startsWith('solana:')?'Consultar prévia: impacto e taxas variáveis':`${money(net)} (${(net/p.costBasis*100).toFixed(2)}%)`,p.userExit?'Programado pelo usuário':`+${p.plan?.takeProfitPct??blend[2]}%`,s.config?.simulationExploration?'Desligado':`-${p.plan?.stopPct??blend[3]}%`,'']);
  const actions=document.createElement('div');actions.className='actions';const sell=document.createElement('button'),schedule=document.createElement('button');sell.textContent='Vender agora';sell.addEventListener('click',()=>previewOrder({asset:id,action:'VENDER',book:'fast'}));schedule.textContent=p.userExit?'Editar programação':'Programar venda';schedule.className='secondary';schedule.addEventListener('click',()=>openSchedule(id,p));actions.append(sell,schedule);row.lastChild.append(actions);if(p.userExit){const note=document.createElement('small');note.textContent=`Programada: ${p.userExit.kind} ${p.userExit.kind==='time'?date(p.userExit.value):p.userExit.value}`;row.lastChild.append(note);}}
 }
 
+function renderJournal(events){
+  const openReports=new Set([...$('events').children].filter(row=>row.querySelector('details')?.open).map(row=>row.dataset.eventId)),selectedCycle=[...$('events').children].find(row=>row.classList.contains('selected-cycle'))?.dataset.cycle;
+  $('events').replaceChildren();
+  for (const event of [...events].reverse()) {
+    const symbol = event.action==='APORTE'?'':event.assetSymbol??assetLabel(event.asset??'bitcoin');
+    const row=cells($('events'), [date(event.at), `${symbol} · ${event.action}${event.mode==='fast'?' · CURTO':event.mode==='assisted'?' · ASSISTIDO':event.mode==='core'?' · CENÁRIO':event.mode==='data'?' · DADOS':''}`, '', money(event.fee??0), money(event.equity)]);
+    row.dataset.cycle=new Date(event.at).toISOString();row.dataset.eventId=event.id??`${event.at}:${event.asset}:${event.action}`;if(event.at===selectedCycle)row.classList.add('selected-cycle');
+    const detail=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Ver decisão';detail.append(summary);
+    detail.addEventListener('toggle',()=>{if(detail.open&&!detail.dataset.loaded){detail.dataset.loaded='true';const reason=document.createElement('p'),pre=document.createElement('pre');reason.textContent=event.reason;pre.textContent=JSON.stringify({parameters:event.parameters,indicators:event.indicators,quote:event.quote,before:event.before,after:event.after,learning:event.learning,realizedPnl:event.realizedPnl},null,2);detail.append(reason,pre);}});
+    row.children[2].append(detail);if(openReports.has(row.dataset.eventId))detail.open=true;
+  }
+}
 function openCycle(at,events){
+ at=new Date(at).toISOString();
  $('decisions-log').open=true;
  const rows=[...$('events').children];for(const row of rows)row.classList.toggle('selected-cycle',row.dataset.cycle===at);
  const selected=rows.find(row=>row.dataset.cycle===at);selected?.scrollIntoView({behavior:'smooth',block:'center'});
  selected?.querySelector('summary')?.focus({preventScroll:true});
- const cycle=events.filter(e=>e.at===at);$('chart-cycle').hidden=false;$('chart-cycle').textContent=`${date(at)} · ${cycle.map(e=>`${assetLabel(e.asset)} ${e.action}`).join(' · ')}. Decisões destacadas no diário; clique em Ver decisão para abrir o motivo.`;
+ const cycle=events.filter(e=>Date.parse(e.at)===Date.parse(at));$('chart-cycle').hidden=false;$('chart-cycle').textContent=`${date(at)} · ${cycle.map(e=>`${assetLabel(e.asset)} ${e.action}`).join(' · ')}. Decisões destacadas no diário; clique em Ver decisão para abrir o motivo.`;
 }
 function assetLabel(id){return catalogue.find(a=>a.id===id)?.symbol??discoveredAssets?.[id]?.symbol??currentViewState?.fast?.positions[id]?.symbol??(id??'Dados');}
+let chartCache=null,chartLoading=false,chartRequestId=0;
+async function loadChart(){
+ if(!connected||!currentViewState)return;
+ const period=$('chart-period').value,token=++chartRequestId;chartLoading=true;
+ try{const data=await request('chart',undefined,true,undefined,{period});if(!Array.isArray(data.points))throw Error('Resposta do histórico inválida');if(token!==chartRequestId||!connected)return;chartCache={period,data,loadedAt:Date.now()};renderChart(currentViewState);}
+ catch(error){if(token===chartRequestId)$('chart-note').textContent='Não foi possível carregar o histórico: '+error.message+'. Use Atualizar gráfico para tentar novamente.';}
+ finally{if(token===chartRequestId)chartLoading=false;}
+}
+async function openChartPoint(point,s){
+ if(!point.auditId){openCycle(point.at,s.events);return;}
+ try{const cycle=await request('chart-cycle',undefined,true,undefined,{id:point.auditId});if(!connected)return;const events=[...s.events,...(cycle?.decisions??[])],unique=[...new Map(events.map(e=>[e.id??`${e.at}:${e.asset}:${e.action}`,e])).values()];renderJournal(unique);openCycle(point.at,unique);}
+ catch(error){$('chart-cycle').hidden=false;$('chart-cycle').textContent=error.message;}
+}
+$('chart-period').addEventListener('change',()=>{chartRequestId++;chartLoading=false;chartCache=null;if(currentViewState)renderChart(currentViewState);});
+$('chart-refresh').addEventListener('click',()=>loadChart());
+$('exploration-toggle').addEventListener('click',()=>update('simulation-exploration',{enabled:!currentViewState?.config?.simulationExploration}));
 function renderChart(s){
- const byTime=new Map();for(const e of s.events)if(Number.isFinite(e.equity)&&Number.isFinite(Date.parse(e.at))&&(!s.capitalUpgrade||Date.parse(e.at)>=Date.parse(s.capitalUpgrade.at)))byTime.set(e.at,e);
+ const period=$('chart-period').value,remote=chartCache?.period===period?chartCache.data:null,windowMs={'1h':3600000,'1d':86400000,'1w':7*86400000,'1m':31*86400000,'1y':366*86400000,'5y':5*366*86400000}[period];
+ const source=remote?remote.points.map(p=>({...p,at:new Date(p.at).toISOString()})):s.events;
+ const byTime=new Map();for(const e of source)if(Number.isFinite(e.equity)&&Number.isFinite(Date.parse(e.at))&&Date.parse(e.at)>=Date.now()-windowMs)byTime.set(e.at,e);
+ if(!chartLoading&&(!chartCache||chartCache.period!==period||Date.now()-chartCache.loadedAt>30000))loadChart();
  const events=[...byTime.values()].sort((a,b)=>Date.parse(a.at)-Date.parse(b.at)),values=events.map(e=>e.equity);
- const lo=Math.min(s.initialCapital,...values)-.1,hi=Math.max(s.initialCapital,...values)+.1,start=events.length?Date.parse(events[0].at):0,end=events.length?Date.parse(events.at(-1).at):start;
+ const lo=(values.length?Math.min(...values):0)-.1,hi=(values.length?Math.max(...values):0)+.1,start=events.length?Date.parse(events[0].at):0,end=events.length?Date.parse(events.at(-1).at):start;
  const points=events.map(e=>({event:e,x:end===start?400:10+(Date.parse(e.at)-start)/(end-start)*780,y:150-(e.equity-lo)/(hi-lo)*140}));
  $('line').setAttribute('d',points.map((p,i)=>`${i?'L':'M'} ${p.x} ${p.y}`).join(' '));$('chart-points').replaceChildren();
- for(const p of points){const c=document.createElementNS('http://www.w3.org/2000/svg','circle'),title=document.createElementNS('http://www.w3.org/2000/svg','title');c.setAttribute('cx',p.x);c.setAttribute('cy',p.y);c.setAttribute('r','4');c.setAttribute('tabindex','0');c.setAttribute('role','button');c.setAttribute('aria-label',`${date(p.event.at)} · ${money(p.event.equity)} · abrir decisões`);title.textContent=c.getAttribute('aria-label');c.append(title);c.addEventListener('click',e=>{e.stopPropagation();openCycle(p.event.at,s.events);});c.addEventListener('keydown',e=>{if(['Enter',' '].includes(e.key)){e.preventDefault();openCycle(p.event.at,s.events);}});$('chart-points').append(c);}
- $('chart').onclick=e=>{if(!points.length)return;const p=$('chart').createSVGPoint();p.x=e.clientX;p.y=e.clientY;const at=p.matrixTransform($('chart').getScreenCTM().inverse());const nearest=points.reduce((best,p)=>Math.abs(p.x-at.x)<Math.abs(best.x-at.x)?p:best);openCycle(nearest.event.at,s.events);};
- $('chart-note').textContent=points.length?`De ${money(Math.min(...values))} a ${money(Math.max(...values))} · ${points.length} ciclos desde o último aporte · clique em um ponto para abrir aquele momento.`:'O gráfico aparece após o primeiro ciclo.';
+ for(const p of points){const c=document.createElementNS('http://www.w3.org/2000/svg','circle'),title=document.createElementNS('http://www.w3.org/2000/svg','title');c.setAttribute('cx',p.x);c.setAttribute('cy',p.y);c.setAttribute('r','4');c.setAttribute('tabindex','0');c.setAttribute('role','button');c.setAttribute('aria-label',`${date(p.event.at)} · ${money(p.event.equity)} · abrir decisões`);title.textContent=c.getAttribute('aria-label');c.append(title);c.addEventListener('click',e=>{e.stopPropagation();openChartPoint(p.event,s);});c.addEventListener('keydown',e=>{if(['Enter',' '].includes(e.key)){e.preventDefault();openChartPoint(p.event,s);}});$('chart-points').append(c);}
+ $('chart').onclick=e=>{if(!points.length)return;const p=$('chart').createSVGPoint();p.x=e.clientX;p.y=e.clientY;const at=p.matrixTransform($('chart').getScreenCTM().inverse());const nearest=points.reduce((best,p)=>Math.abs(p.x-at.x)<Math.abs(best.x-at.x)?p:best);openChartPoint(nearest.event,s);};
+ $('chart-window').textContent=remote?`${remote.cycleCount} ciclos · ${points.length} pontos`:'Decisões recentes · carregando histórico';
+ $('chart-note').textContent=(points.length?`De ${money(Math.min(...values))} a ${money(Math.max(...values))}. Clique em um ponto para abrir as decisões. `:'Sem ciclos registrados neste prazo. ')+(remote?.availableFrom?`Histórico disponível desde ${date(remote.availableFrom)}. Os pontos resumem o último ciclo de cada intervalo; aportes também alteram o patrimônio.`:'Ainda consultando o histórico persistente.');
 }
 
 let scheduledAsset=null;
@@ -366,7 +392,7 @@ function openSchedule(id,position){scheduledAsset=id;$('sale-schedule-title').te
 function syncSaleCondition(){const timed=$('sale-condition').value==='time';$('sale-number-label').hidden=timed;$('sale-time-label').hidden=!timed;$('sale-value').required=!timed;$('sale-time').required=timed;}
 $('sale-condition').addEventListener('change',syncSaleCondition);
 $('sale-close-form').addEventListener('click',()=>{$('sale-schedule-form').hidden=true;});
-$('sale-schedule-form').addEventListener('submit',async e=>{e.preventDefault();const kind=$('sale-condition').value,value=kind==='time'?new Date($('sale-time').value+':00-03:00').toISOString():Number($('sale-value').value);const ok=await update('schedule-sale',{asset:scheduledAsset,kind,value,expectedVersion:version});if(ok){$('sale-schedule-form').hidden=true;$('sale-message').textContent='Venda programada salva; os limites de perda continuam ativos.';}});
+$('sale-schedule-form').addEventListener('submit',async e=>{e.preventDefault();const kind=$('sale-condition').value,value=kind==='time'?new Date($('sale-time').value+':00-03:00').toISOString():Number($('sale-value').value);const ok=await update('schedule-sale',{asset:scheduledAsset,kind,value,expectedVersion:version});if(ok){$('sale-schedule-form').hidden=true;$('sale-message').textContent=currentViewState?.config?.simulationExploration?'Venda programada salva; stop automático de perda desligado neste modo.':'Venda programada salva; os limites de perda continuam ativos.';}});
 $('sale-cancel-order').addEventListener('click',async()=>{const ok=await update('schedule-sale',{asset:scheduledAsset,kind:'cancel',expectedVersion:version});if(ok){$('sale-schedule-form').hidden=true;$('sale-message').textContent='Programação removida.';}});
 
 
@@ -390,6 +416,9 @@ function renderPredictions(s){
 function renderLearning(s){
  const l=s.learning;
  $('learning-summary').textContent=l?`${l.closed} resultados de entradas avaliados · atualizado ${date(l.updatedAt)}`:'Hipóteses de entrada são registradas; aprendizado de resultado ocorre na saída, sem inventar acertos.';
+ $('learning-arms').replaceChildren();
+ const arms=Object.entries(l?.explorationArms??{});
+ if(arms.length){const title=document.createElement('p');title.textContent='Aprendizado das saídas na exploração simulada (retornos líquidos observados; não são previsões garantidas).';const table=document.createElement('table'),head=document.createElement('thead'),body=document.createElement('tbody');cells(head,['Grupo / saída','Vendas avaliadas','Resultado médio líquido','Vendas positivas']);for(const [key,arm] of arms)cells(body,[key,String(arm.trades),`${(arm.sumNetPct/arm.trades).toFixed(2)}%`,`${arm.wins}/${arm.trades}`]);table.append(head,body);$('learning-arms').append(title,table);}
  $('learning-items').replaceChildren();
  for(const item of [...(l?.summaries??[])].reverse().slice(0,30)){
   const d=document.createElement('details'),summary=document.createElement('summary'),p=document.createElement('p');

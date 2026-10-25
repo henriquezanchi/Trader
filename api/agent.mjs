@@ -1,3 +1,5 @@
+import { setExploration } from '../lib/exploration.mjs';
+import { randomUUID } from 'node:crypto';
 import { forecastReadiness, READINESS_POLICY } from '../lib/forecast-assessment.mjs';
 import { auditForecast, PREDICTION_PROTOCOL } from '../lib/prediction-protocol.mjs';
 import { historicalDirection, commitHistoricalDirection, fitHistoricalDirection, rememberHistoryBackoff } from '../lib/forecast-history.mjs';
@@ -25,12 +27,22 @@ export default async function handler(req, res) {
     catch (error) { return res.status(error.status ?? 503).json({ error: error.status ? error.message : 'Serviço de acesso indisponível' }); }
     if (req.method !== 'GET' && !sameOrigin(req)) return res.status(403).json({ error: 'Origem da solicitação inválida' });
   }
-  if (!['status', 'tick', 'pause', 'resume', 'configure', 'audit', 'bootstrap', 'opportunities', 'preview', 'confirm', 'research', 'research-refresh', 'capital-upgrade', 'markets', 'fast-preview', 'fast-confirm', 'schedule-sale', 'history-train', 'quality'].includes(action)) return res.status(400).json({ error: 'Ação desconhecida' });
-  if (req.method !== (['status', 'audit', 'opportunities', 'research', 'markets', 'quality'].includes(action) ? 'GET' : 'POST')) return res.status(405).json({ error: 'Método não permitido' });
+  if (!['status', 'tick', 'pause', 'resume', 'configure', 'audit', 'bootstrap', 'opportunities', 'preview', 'confirm', 'research', 'research-refresh', 'capital-upgrade', 'markets', 'fast-preview', 'fast-confirm', 'schedule-sale', 'history-train', 'quality', 'chart', 'chart-cycle', 'simulation-exploration'].includes(action)) return res.status(400).json({ error: 'Ação desconhecida' });
+  if (req.method !== (['status', 'audit', 'opportunities', 'research', 'markets', 'quality', 'chart', 'chart-cycle'].includes(action) ? 'GET' : 'POST')) return res.status(405).json({ error: 'Método não permitido' });
   try {
     const repo = repository();
     const commit = repo.commit;
     repo.commit = (version, state) => commit(version, { ...state, lastMutation: { actor: scheduler ? 'scheduler' : 'user', userId, action, at: new Date().toISOString() } });
+    if(action==='chart'){
+      const period=new URL(req.url,'https://local.invalid').searchParams.get('period')??'1d';
+      if(!['1h','1d','1w','1m','1y','5y'].includes(period))return res.status(400).json({error:'Prazo inválido'});
+      return res.status(200).json(await repo.chart(period));
+    }
+    if(action==='chart-cycle'){
+      const id=new URL(req.url,'https://local.invalid').searchParams.get('id');
+      if(!/^[1-9][0-9]{0,14}$/.test(id??''))return res.status(400).json({error:'Ciclo inválido'});
+      return res.status(200).json(await repo.chartCycle(id));
+    }
     if(action==='quality'){
       const report=await repo.quality(),{state}=await repo.read(),pending=state.intelligence?.directionPending??[],checked=pending.filter(p=>p.protocolId===PREDICTION_PROTOCOL.id).map(auditForecast);
       const forecastAssessment=Object.keys(state.intelligence?.history??{}).flatMap(id=>[1,6,24].map(h=>forecastReadiness(state,id,h)));
@@ -61,6 +73,13 @@ export default async function handler(req, res) {
     }
     if(action==='markets')return res.status(200).json({quotes:await getETFs(ETF_IDS)});
     const { version, state } = await repo.read();
+    if(action==='simulation-exploration'){
+      const body=await readBody(req);let next;
+      try{next=setExploration(state,body.enabled);}catch(error){return res.status(400).json({error:error.message});}
+      next.events=[...next.events,{id:randomUUID(),at:new Date().toISOString(),mode:'control',action:'CONFIGURAR',reason:next.reason,fee:0,equity:equity(next),parameters:{simulationExploration:body.enabled}}].slice(-200);
+      await repo.commit(version,next);
+      return res.status(200).json({state:next,version:version+1,assets:ASSETS,profiles:PROFILES,limits:LIMITS});
+    }
     if(action==='schedule-sale'){
       let next;try{next=scheduleSale(state,await readBody(req),version,userId);}catch(error){return res.status(409).json({error:error.message});}
       await repo.commit(version,next);return res.status(200).json({state:next,version:version+1,limits:LIMITS,assets:ASSETS,profiles:PROFILES});

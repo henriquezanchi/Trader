@@ -111,3 +111,17 @@ test('relatório de qualidade é privado e não desconta taxas duas vezes do res
  assert.deepEqual((await db.query("select public.trade_lab_training_data_read('bitcoin') as result")).rows[0].result.observations,[102]);
  }finally{await db.close();}
 });
+
+test('gráfico persistente: prazos, amostragem, ciclo original e acesso privado',async()=>{
+ const db=new PGlite();try{
+ await db.exec('create role anon;create role authenticated;create role service_role bypassrls;');
+ for(const name of ['001_trade_lab.sql','002_audit.sql','006_equity_history.sql'])await db.exec(await readFile(new URL('../supabase/'+name,import.meta.url),'utf8'));
+ await db.exec(`insert into trade_lab.audit(state_version,kind,decisions,context) select 1000+i,'cycle',jsonb_build_array(jsonb_build_object('id','p'||i,'at',now()-i*interval '1 day','equity',1000+i,'action','AGUARDAR','reason','histórico real de teste')),'{}'::jsonb from generate_series(0,2000)i`);
+ const row=(await db.query("select public.trade_lab_chart_read('5y') as chart")).rows[0].chart;
+ assert.ok(row.points.length>200);assert.ok(row.points.length<400);assert.ok(row.cycleCount>1800);assert.ok(row.availableFrom);
+ const last=row.points.at(-1);assert.equal(last.equity,1000);assert.ok((await db.query('select public.trade_lab_chart_cycle($1) as c',[last.auditId])).rows[0].c.decisions.length);
+ assert.equal((await db.query("select public.trade_lab_chart_read('1h') as chart")).rows[0].chart.cycleCount,1);
+ await assert.rejects(db.query("select public.trade_lab_chart_read('invalid')"),/Prazo/);
+ for(const role of ['anon','authenticated']){await db.exec('set role '+role);await assert.rejects(db.query("select public.trade_lab_chart_read('1d')"),/permission denied/);await assert.rejects(db.query('select * from trade_lab.equity_points'),/permission denied/);await db.exec('reset role');}
+ }finally{await db.close();}
+});
