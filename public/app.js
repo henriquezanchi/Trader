@@ -387,7 +387,37 @@ function renderPredictions(s){
  $('prediction-items').replaceChildren();for(const p of (r?.directionPending??[]).filter(p=>String(p.horizon)===h).slice(-12).reverse()){const detail=document.createElement('details'),title=document.createElement('summary'),pre=document.createElement('pre');title.textContent=`${assetLabel(p.asset)} · ${p.probability>=.5?'SUBIR':'DESCER'} · avaliar em ${date(p.targetAt)}${p.primary?' · amostra principal':''}`;pre.textContent=JSON.stringify({id:p.id,protocol:p.protocolId,knownAt:p.knownAt,priceAt:p.priceAt,basePrice:p.price,probability:p.probability,modelHash:p.modelHash,inputHash:p.inputHash,vector:p.vector,model:p.modelSnapshot,baselines:p.baselines},null,2);detail.append(title,pre);$('prediction-items').append(detail);}
 }
 
-function renderLearning(s){const l=s.learning;$('learning-summary').textContent=l?`${l.closed} resultados de entradas avaliados · atualizado ${date(l.updatedAt)}`:'Hipóteses de entrada são registradas; aprendizado de resultado ocorre na saída, sem inventar acertos.';$('learning-items').replaceChildren();for(const item of [...(l?.summaries??[])].reverse().slice(0,30)){const d=document.createElement('details'),summary=document.createElement('summary'),p=document.createElement('p');summary.textContent=`${date(item.at)} · ${assetLabel(item.asset)} · ${item.netPct.toFixed(2)}% líquido`;p.textContent=item.summary+' Próxima postura: '+(item.nextBehavior?.reason??'avaliar mais exemplos');d.append(summary,p);$('learning-items').append(d);}}
+function renderLearning(s){
+ const l=s.learning;
+ $('learning-summary').textContent=l?`${l.closed} resultados de entradas avaliados · atualizado ${date(l.updatedAt)}`:'Hipóteses de entrada são registradas; aprendizado de resultado ocorre na saída, sem inventar acertos.';
+ $('learning-items').replaceChildren();
+ for(const item of [...(l?.summaries??[])].reverse().slice(0,30)){
+  const d=document.createElement('details'),summary=document.createElement('summary'),p=document.createElement('p');
+  summary.textContent=`${date(item.at)} · ${assetLabel(item.asset)} · ${item.netPct.toFixed(2)}% líquido`;
+  p.textContent=item.summary+' Próxima postura: '+(item.nextBehavior?.reason??'avaliar mais exemplos');
+  d.append(summary,p);
+  const e=item.nextBehavior?.economics;
+  if(e){
+   const table=document.createElement('table'),body=document.createElement('tbody');
+   const amount=value=>Number.isFinite(value)?money(value):'Não disponível';
+   const rate=value=>Number.isFinite(value)?`${(value*100).toFixed(1)}%`:'Não disponível';
+   for(const row of [
+    ['Vendas recentes neste cenário',String(e.sales)],
+    ['Acertos nas vendas',rate(e.winRate)],
+    ['Resultado líquido acumulado',amount(e.netPnl)],
+    ['Resultado líquido médio por venda',amount(e.expectancyBRL)],
+    ['Ganho médio nas vendas positivas',amount(e.averageWinBRL)],
+    ['Perda média nas vendas negativas',amount(e.averageLossBRL)],
+    ['Ganhos acumulados ÷ perdas acumuladas',Number.isFinite(e.profitFactor)?e.profitFactor.toFixed(2):'Não disponível sem perdas observadas'],
+    ['Acerto necessário para equilíbrio',rate(e.breakEvenWinRate)],
+    ['Novas entradas bloqueadas até',item.nextBehavior.blockedUntil?date(item.nextBehavior.blockedUntil):'Sem bloqueio neste registro']
+   ])cells(body,row);
+   table.append(body);const scroll=document.createElement('div');scroll.className='table-scroll';scroll.append(table);d.append(scroll);
+   const note=document.createElement('p');note.className='muted';note.textContent='Retrato calculado na data desta saída, não o estado atual. '+e.note+' O equilíbrio usa os ganhos e perdas médios observados; não é uma probabilidade prevista. Custos já incluídos no resultado líquido.';d.append(note);
+  }else{const note=document.createElement('p');note.className='muted';note.textContent='Registro anterior à avaliação econômica detalhada. Valores não foram reconstruídos nem estimados.';d.append(note);}
+  $('learning-items').append(d);
+ }
+}
 $('prediction-horizon').addEventListener('change',()=>{if(currentViewState)renderPredictions(currentViewState);});
 $('train-history').addEventListener('click',async()=>{if(!currentViewState)return;const ids=Object.keys(currentViewState.config?.allocations??{}).filter(id=>catalogue.find(a=>a.id===id)?.market!=='b3');$('train-history').disabled=true;let trained=0;const failed=[];for(const asset of ids){$('training-status').textContent=`Importando ${trained+failed.length+1}/${ids.length}: ${assetLabel(asset)}…`;try{const result=await request('history-train',{asset});render(result);trained++;}catch(e){failed.push(assetLabel(asset));if(e.status===429){failed.push('demais ativos adiados pelo limite do provedor');break;}}}$('training-status').textContent=`${trained} ativos com histórico importado e teste cronológico concluído.${failed.length?' Sem fonte válida: '+failed.join(', '):''}`;$('train-history').disabled=false;});
 
