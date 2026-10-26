@@ -189,3 +189,13 @@ node scripts/minute-research.mjs --input historico.csv --asset bitcoin \
 ```
 
 As mesmas restrições de moeda, horários disponíveis, fonte e ausência de interpolação continuam obrigatórias. A coleta atual de auditoria é limitada às últimas 6000 cotações por ativo para cada estudo remoto; o comando local permite comparar arquivos maiores. Não pressupomos ter meses de preços em minutos quando eles não foram obtidos.
+
+### Recuperação de cotações e posições em pools
+
+A atualização das posições abertas é independente da descoberta de novos pools. A busca de novos ativos é desligada enquanto a simulação estiver pausada, mas posições já abertas continuam sendo consultadas para avaliação e saídas de risco/prazo já previstas. A pausa e os parâmetros salvos não são alterados por essa recuperação.
+
+As consultas de posições são divididas em lotes de até 20 endereços, até quatro lotes por ciclo. Livros maiores são alternados entre ciclos, preservando os registros ainda não consultados. Uma resposta HTTP com erro, um pool omitido ou um registro inválido não invalida os demais lotes. Diagnósticos registram o tamanho dos lotes, código HTTP quando disponível e motivo por posição. Só uma resposta válida atualiza o instante da cotação. Dados de token diferentes dos da posição, reserva zero, preços inválidos e respostas incompletas não geram uma venda fictícia nem uma baixa automática de 100%.
+
+O câmbio USDC/BRL pode usar o registro anterior somente enquanto o seu horário original tiver no máximo dez minutos. A cotação do pool precisa ter sido consultada nos últimos dois minutos; não é rejuvenescida quando ocorre uma falha. Sem conversão BRL válida, não são publicadas cotações negociáveis. A fonte continua sendo indicativa, sem comprovação de execução real ou verificação de impostos do token.
+
+Posições que precisariam sair mas não têm preço válido recebem `pendingExit` com motivo e data; a quantidade, o custo e o histórico são preservados. Quando há uma cotação válida, o motor normal pode liquidá-las pelos critérios de risco/prazo existentes, mantendo a simulação pausada para novas entradas. O painel distingue avaliação recente de antiga, sinaliza quando o patrimônio depende de preços antigos e mostra as pendências recolhidas até clicar. Valores antigos não são tratados como caixa disponível ou como prova de liquidez atual.
