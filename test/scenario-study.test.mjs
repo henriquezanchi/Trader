@@ -55,3 +55,9 @@ test('referência pareada só é registrada quando conhece exatamente os mesmos 
  const later=advanceStudyDirections(first,{bitcoin:{price:111,observedAt:new Date(now+3600000).toISOString()}},[],now+3600000);
  const record=later.intelligence.scenarioLive.metrics['scenario-comparison-v2:bitcoin:1'];assert.equal(record.referenceStats.valid,1);assert.equal(record.pairedStats.valid,1);
 });
+
+test('meta rejeita 80% quando prever sempre queda teria o mesmo acerto',()=>{
+ const m={valid:200,accuracy:.8,tp:0,tn:160,fp:0,fn:40,coverage:1,brierSkill:.1,alwaysUpAccuracy:.2,momentumAccuracy:.5};
+ const result=goalEvidence(m,{buyCases:40,buyCoverage:1,meanNetPct:.2,meanStressNetPct:.1},{prospective:true});
+ assert.equal(result.demonstrated,false);assert.ok(result.reasons.some(r=>r.includes('sempre queda')));
+});

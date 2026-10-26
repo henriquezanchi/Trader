@@ -34,7 +34,7 @@ test('principal de 6h não mistura previsões sobrepostas; legado fica preservad
 });
 test('empates não viram acerto e previsões confiantes erradas perdem para 50%',()=>{
  const stats=newScore();stats.issued=3;scoreOutcome(stats,{probability:.9,baselines:{momentumUp:false}},{status:'scored',rawPct:-1});scoreOutcome(stats,{probability:.1,baselines:{momentumUp:true}},{status:'scored',rawPct:1});scoreOutcome(stats,{probability:.9},{status:'scored',rawPct:0});const view=scoreView(stats);
- assert.equal(view.valid,3);assert.equal(view.flat,1);assert.equal(view.accuracy,0);assert.ok(view.brierSkill<0);assert.equal(view.momentumAccuracy,2/3);assert.equal(view.calibration[9].n,1);assert.equal(view.calibration[9].observedUpRate,0);assert.ok(Number.isFinite(view.logLoss));
+ assert.equal(view.valid,3);assert.equal(view.flat,1);assert.equal(view.alwaysDownAccuracy,1/3);assert.equal(view.accuracy,0);assert.ok(view.brierSkill<0);assert.equal(view.momentumAccuracy,2/3);assert.equal(view.calibration[9].n,1);assert.equal(view.calibration[9].observedUpRate,0);assert.ok(Number.isFinite(view.logLoss));
 });
 test('decisão referencia previsão registrada, sem recalcular outra probabilidade escondida',()=>{
  const first=advanceDirections(state(),quotes(),now),p=first.intelligence.latestDirectionalForecasts.bitcoin[1];first.intelligence.directionByAsset.bitcoin[1].weights.fill(-20);

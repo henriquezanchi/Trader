@@ -495,7 +495,22 @@ function renderScenarioDetail(container,report){
 function renderScenarioLive(s){
  const summaries=[...(s.intelligence?.scenarioLive?.summary??[]),...(s.intelligence?.executionLive?.summary??[])],known=summaries.reduce((n,r)=>n+r.metrics.valid,0),met=summaries.filter(r=>r.goal.demonstrated).length;
  $('scenario-live').textContent=`Confirmação prospectiva: ${known} resultados registrados após a escolha dos métodos; ${met}/${summaries.length} conjuntos de ativo e prazo atingiram os critérios empíricos da meta. Isso não habilita dinheiro real. Os ativos e os diferentes prazos podem ser correlacionados; séries horárias e de minutos não são misturadas.`;
- $('scenario-live-table').replaceChildren();if(summaries.length){const table=document.createElement('table'),head=document.createElement('thead'),body=document.createElement('tbody');cells(head,['Ativo','Versão','Prazo','Acertos / válidas','Acerto','Cobertura','Referência nos mesmos casos','Meta empírica']);for(const v of summaries)cells(body,[assetLabel(v.asset),v.protocol??'scenario-comparison-v1',v.horizon+(v.horizonUnit==='minutes'?'min':'h'),`${v.metrics.correct}/${v.metrics.valid}`,researchPct(v.metrics.accuracy),researchPct(v.metrics.coverage),v.paired?.reference?.valid?`${researchPct(v.paired.reference.accuracy)} (${v.paired.reference.valid} casos); candidato ${researchPct(v.paired.challenger.accuracy)}`:'—',v.goal.demonstrated?'Critérios atingidos no papel':'Em avaliação']);table.append(head,body);$('scenario-live-table').append(table);}
+ $('scenario-live-table').replaceChildren();if(summaries.length){
+  const table=document.createElement('table'),head=document.createElement('thead'),body=document.createElement('tbody');
+  cells(head,['Ativo','Versão','Prazo','Acertos / válidas','Acerto','Cobertura','Referência nos mesmos casos','Meta empírica','Evidências']);
+  for(const v of summaries){
+   cells(body,[assetLabel(v.asset),v.protocol??'scenario-comparison-v1',v.horizon+(v.horizonUnit==='minutes'?'min':'h'),`${v.metrics.correct}/${v.metrics.valid}`,researchPct(v.metrics.accuracy),researchPct(v.metrics.coverage),v.paired?.reference?.valid?`${researchPct(v.paired.reference.accuracy)} (${v.paired.reference.valid} casos); candidato ${researchPct(v.paired.challenger.accuracy)}`:'—',v.goal.demonstrated?'Critérios atingidos no papel':'Em avaliação']);
+   const cell=document.createElement('td'),details=document.createElement('details'),title=document.createElement('summary');title.textContent='Ver avaliação';details.append(title);
+   const m=v.metrics,e=v.economics??{},down=m.valid?(m.tn+m.fp)/m.valid:null;
+   const lines=[`Referências nos mesmos casos: sempre alta ${researchPct(m.alwaysUpAccuracy)}; sempre queda ${researchPct(down)}; último movimento ${researchPct(m.momentumAccuracy)}.`,
+    `Acerto equilibrado entre altas e baixas: ${researchPct(m.balancedAccuracy)}. Preços sem variação: ${m.flat??0}; preços ausentes: ${m.missing??0}.`,
+    `Compras hipotéticas avaliadas: ${e.buyCases??0}; retorno médio líquido ${researchPct(e.meanNetPct==null?null:e.meanNetPct/100)}; com custos dobrados ${researchPct(e.meanStressNetPct==null?null:e.meanStressNetPct/100)}. São referências de previsão, sem movimentar o saldo.`,
+    `Meta de 80%: ${(v.goal.reasons??[]).join('; ')||'Critérios empíricos atingidos no papel'}.`];
+   for(const text of lines){const p=document.createElement('p');p.textContent=text;details.append(p);}cell.append(details);body.lastElementChild.append(cell);
+  }
+  table.append(head,body);$('scenario-live-table').append(table);
+ }
+
 }
 $('scenario-version').addEventListener('change',()=>{scenarioCache=null;loadScenarioReports(true);});
 async function runAllStudies(execution=false){

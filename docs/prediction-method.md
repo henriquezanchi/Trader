@@ -117,3 +117,9 @@ Os modelos comparam os mesmos treze candidatos, separando treino/validação/tes
 Cada prazo tem previsões futuras, hashes e contadores próprios, separados das versões horárias. Uma previsão atual de prazo igual pode ser referenciada no diário de uma entrada, mas não é automaticamente tratada como vantagem comprovada nem recebe acerto pelo simples fato de a operação ter lucrado antes do alvo. As referências sem movimentação de saldo continuam separadas. As metas de 200 casos prospectivos, 80% de acerto, cobertura e resultado líquido positivo são mantidas. A obtenção mais rápida de amostras não garante maior acerto.
 
 Os estudos curtos usam até seis mil observações arquivadas e são reavaliados em rodízio quando completam seis horas, com novos preços, quando o ciclo principal termina com tempo disponível. Falhas de pesquisa não desfazem a gravação da carteira. O painel exige escolher explicitamente a série de minutos; a opção padrão continua mostrando os estudos horários.
+
+### Referência de queda e avaliação no painel
+
+A meta empírica exige vantagem de mais de três pontos percentuais sobre as três referências nos mesmos casos: prever sempre alta, prever sempre queda e seguir o último movimento. A referência de queda é `(tn + fp) / valid`; preços sem variação continuam contando como erro para ambas as referências direcionais. Isso impede confundir um mercado predominantemente em queda com aprendizado superior. Os resultados originais e os modelos escolhidos permanecem preservados.
+
+Na confirmação prospectiva, “Ver avaliação” abre os motivos da meta, acerto equilibrado, ausências, referências e retorno médio das compras hipotéticas após custos normais e dobrados. Essas compras são avaliações das previsões no horizonte registrado, não operações extras na carteira.
