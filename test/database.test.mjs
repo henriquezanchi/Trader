@@ -190,3 +190,18 @@ test('comparação de saídas preserva arquivos anteriores, acesso privado e est
  assert.deepEqual((await db.query('select payload from trade_lab.state')).rows[0].payload,before);
  }finally{await db.close();}
 });
+
+test('pesquisa adaptativa V2 preserva V1 e não entra nos modelos de previsão ou no saldo',async()=>{
+ const db=new PGlite();try{
+ await db.exec('create role anon;create role authenticated;create role service_role bypassrls;');
+ for(const name of ['001_trade_lab.sql','002_audit.sql','008_scenario_studies.sql','009_scenario_versions.sql','010_execution_quotes.sql','011_walk_forward.sql','012_trend_exits.sql','013_adaptive_trend.sql'])await db.exec(await readFile(new URL('../supabase/'+name,import.meta.url),'utf8'));
+ const before=(await db.query('select payload from trade_lab.state')).rows[0].payload;
+ await db.exec('set role service_role');const obs=Array.from({length:240},()=>({})),saved={};
+ for(const protocol of ['trend-exit-comparison-v1','trend-exit-comparison-v2']){const report={asset:'bitcoin',protocol:{id:protocol},datasetHash:'same-points',summary:{protocol}};saved[protocol]=(await db.query('select public.trade_lab_scenario_save($1,$2::jsonb,$3::jsonb,$4::jsonb) as id',['bitcoin',JSON.stringify(report),'{}',JSON.stringify(obs)])).rows[0].id;}
+ assert.notEqual(saved['trend-exit-comparison-v1'],saved['trend-exit-comparison-v2']);
+ assert.equal((await db.query("select public.trade_lab_scenario_version('bitcoin','trend-exit-comparison-v1') as r")).rows[0].r.studies[0].id,saved['trend-exit-comparison-v1']);
+ assert.deepEqual((await db.query('select public.trade_lab_walk_models() as m')).rows[0].m,[]);
+ await db.exec('reset role');await db.exec('set role anon');await assert.rejects(db.query("select public.trade_lab_scenario_version('bitcoin','trend-exit-comparison-v2')"),/permission denied/);await db.exec('reset role');
+ assert.deepEqual((await db.query('select payload from trade_lab.state')).rows[0].payload,before);
+ }finally{await db.close();}
+});

@@ -171,3 +171,15 @@ test('comparação tendência e saída móvel é privada e não grava posições
  const response=res();await agentHandler({url:'/api/agent?action=scenario-run',method:'POST',body:{asset:'bitcoin',timeframe:'trend-exits'},headers:{origin,cookie:'__Host-trade_lab_access=synthetic-access'}},response);
  assert.equal(response.code,200);assert.equal(response.data.summary.protocol,'trend-exit-comparison-v1');assert.equal(calls.some(c=>c.url.endsWith('trade_lab_commit')),false);
 }));
+
+test('recuos e volatilidade V2 gravam somente estudo privado, sem alterar a carteira',async()=>sandbox(async({setProvider,calls})=>{
+ const now=Date.now(),points=Array.from({length:600},(_,i)=>({at:new Date(now-(600-i)*120000).toISOString(),price:100+Math.sin(i/11),source:'coingecko'}));
+ setProvider(async(url)=>{
+  if(url.endsWith('/auth/v1/user'))return {ok:true,json:async()=>owner};
+  if(url.endsWith('trade_lab_execution_data'))return {ok:true,json:async()=>points};
+  if(url.endsWith('trade_lab_scenario_save'))return {ok:true,json:async()=>99};
+  throw Error('Unexpected provider request');
+ });
+ const r=res();await agentHandler({url:'/api/agent?action=scenario-run',method:'POST',body:{asset:'bitcoin',timeframe:'trend-adaptive'},headers:{origin,cookie:'__Host-trade_lab_access=synthetic-access'}},r);
+ assert.equal(r.code,200);assert.equal(r.data.summary.protocol,'trend-exit-comparison-v2');assert.equal(r.data.summary.candidateCount,11);assert.equal(calls.some(c=>c.url.endsWith('trade_lab_commit')),false);
+}));

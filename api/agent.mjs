@@ -1,4 +1,4 @@
-import { runTrendStudy } from '../lib/trend-study.mjs';
+import { runTrendStudy,runAdaptiveTrendStudy } from '../lib/trend-study.mjs';
 import { runWalkForward } from '../lib/walk-forward.mjs';
 import { runExecutionStudy,EXECUTION_PROTOCOL } from '../lib/execution-study.mjs';
 import { runScenarioStudy, STUDY_PROTOCOL } from '../lib/scenario-study.mjs';
@@ -41,13 +41,17 @@ export default async function handler(req, res) {
     if(action==='scenario-report'){
       const asset=new URL(req.url,'https://local.invalid').searchParams.get('asset');
       if(asset&&!['bitcoin','ethereum','solana','binancecoin','ripple','cardano','chainlink','avalanche-2','polkadot','litecoin'].includes(asset))return res.status(400).json({error:'Ativo sem estudo horário'});
-      const protocol=new URL(req.url,'https://local.invalid').searchParams.get('protocol');if(protocol&&!['scenario-comparison-v1','scenario-comparison-v2','execution-horizons-v1','execution-walk-forward-v1','trend-exit-comparison-v1'].includes(protocol))return res.status(400).json({error:'Versão de estudo inválida'});
+      const protocol=new URL(req.url,'https://local.invalid').searchParams.get('protocol');if(protocol&&!['scenario-comparison-v1','scenario-comparison-v2','execution-horizons-v1','execution-walk-forward-v1','trend-exit-comparison-v1','trend-exit-comparison-v2'].includes(protocol))return res.status(400).json({error:'Versão de estudo inválida'});
       return res.status(200).json(await repo.scenarioRead(asset,protocol));
     }
     if(action==='scenario-run'){
       const body=await readBody(req),asset=body.asset;
       if(!['bitcoin','ethereum','solana','binancecoin','ripple','cardano','chainlink','avalanche-2','polkadot','litecoin'].includes(asset))return res.status(400).json({error:'Ativo sem histórico horário'});
-      if(body.timeframe!==undefined&&!['execution','walk-forward','trend-exits'].includes(body.timeframe))return res.status(400).json({error:'Tipo de estudo inválido'});
+      if(body.timeframe!==undefined&&!['execution','walk-forward','trend-exits','trend-adaptive'].includes(body.timeframe))return res.status(400).json({error:'Tipo de estudo inválido'});
+      if(body.timeframe==='trend-adaptive'){
+        const study=runAdaptiveTrendStudy(await repo.executionData(asset),asset),id=await repo.scenarioSave(asset,study,study.observations);
+        return res.status(200).json({id,summary:study.report.summary});
+      }
       if(body.timeframe==='trend-exits'){
         const study=runTrendStudy(await repo.executionData(asset),asset),id=await repo.scenarioSave(asset,study,study.observations);
         return res.status(200).json({id,summary:study.report.summary});
