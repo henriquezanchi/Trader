@@ -73,3 +73,14 @@ test('comparações de caixa acompanham alternativas longas e saída móvel sem 
  advanceEntryReferences(s,q(4,103),now+240000);
  const b=advanceEntryReferences(s,q(6,102.5),now+360000),r=b.outcomes.find(r=>r.arm==='trend-hours');assert.ok(r);assert.equal(r.exitReason,'trailing');assert.ok(r.netPct>0);assert.equal(s.cash,1000);
 });
+
+test('foco em tendência evita compras curtas, explica recusa e preserva modo em clientes antigos',()=>{
+ let s=initialState(1000);s.paused=true;s=configurePortfolio(s,{...PROFILES.conservador,profile:'conservador',cryptoStrategy:'active',simulationExploration:true,learningArmMode:'trend',discoveryPct:0});
+ const saved=configurePortfolio(s,{...PROFILES.conservador,profile:'conservador',cryptoStrategy:'active'});assert.equal(saved.config.learningArmMode,'trend');
+ s.paused=false;
+ const quote=price=>({bitcoin:{price,observedAt:at(0),volume24h:1e9},ethereum:{price,observedAt:at(0),volume24h:1e9}});
+ for(const id of ['bitcoin','ethereum']){s.fast??={positions:{},observations:{},cooldowns:{}};s.fast.observations[id]=Array.from({length:23},(_,i)=>({at:at(-46+i*2),observedAt:at(-46+i*2),price:110-i*.1}));}
+ const held=fastStep(s,quote(100),now).state;assert.equal(held.cash,1000);assert.equal(held.fast.stats?.buys??0,0);assert.ok(held.events.some(e=>e.reason.includes('Foco em tendência')&&e.reason.includes('EMA8')));
+ for(const id of ['bitcoin','ethereum'])s.fast.observations[id]=Array.from({length:23},(_,i)=>({at:at(-46+i*2),observedAt:at(-46+i*2),price:99+i*.04}));
+ const bought=fastStep(s,quote(100),now).state;assert.ok(bought.fast.stats.buys>0);for(const p of Object.values(bought.fast.positions).filter(p=>p.quantity>0)){assert.equal(p.plan.exitMode,'trailing');assert.ok([240,1440].includes(p.plan.maxMinutes));}
+});

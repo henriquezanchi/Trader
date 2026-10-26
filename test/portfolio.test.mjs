@@ -115,3 +115,12 @@ test('API persiste configuração por versão, bloqueia conflito e exige token',
     for (const key of ['BOT_TOKEN', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_ANON_KEY', 'TRADE_LAB_USER_IDS', 'TRADE_LAB_EMAILS', 'APP_ORIGIN']) { if (savedEnv[key] == null) delete process.env[key]; else process.env[key] = savedEnv[key]; }
   }
 });
+
+test('desligar novas compras de pools preserva posição pendente e parâmetros financeiros',()=>{
+ let s=initialState(1000);s.paused=true;s=configurePortfolio(s,{...PROFILES.agressivo,profile:'agressivo',cryptoStrategy:'active'});s.cash=700;
+ const id='solana:'+'A'.repeat(32);s.fast={positions:{[id]:{quantity:1,costBasis:20,lastPrice:10,liquidityBRL:100,plan:{maxMinutes:60},pendingExit:{reason:'Sem liquidez'}}}};
+ const p=structuredClone(s.fast.positions[id]);const next=configurePortfolio(s,{...s.config,discoveryPct:0,learningArmMode:'trend'});
+ assert.equal(next.cash,700);assert.equal(next.initialCapital,1000);assert.equal(next.config.discoveryPct,0);assert.deepEqual(next.fast.positions[id],p);
+ assert.throws(()=>configurePortfolio(s,{...s.config,learningArmMode:'unknown'}),/Foco de aprendizado/);
+ s.fast.positions.bitcoin={quantity:1,costBasis:100,lastPrice:100};assert.throws(()=>configurePortfolio(s,{...s.config,allocations:{ethereum:10}}),/Encerre a posição/);
+});

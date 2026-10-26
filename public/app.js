@@ -42,6 +42,7 @@ function cells(parent, texts) {
 function fillSettings(c) {
   $('profile').value = c.profile;
   $('crypto-strategy').value=c.cryptoStrategy??'trend';
+  $('learning-arm-mode').value=c.learningArmMode??'mixed';
   for (const key of fields) $(key).value = key==='learningExplorationPct'?(c.learningExplorationPct??20):key==='discoveryPct'?(c.discoveryPct??(c.profile.includes('agressivo')?15:c.profile.includes('conservador')?0:5)):c[key];
   for (const a of catalogue) $(`weight-${a.id}`).value = c.allocations[a.id] ?? 0;
   mixSummary();
@@ -131,11 +132,11 @@ async function update(action = 'status', body) {
   finally { busy = false; document.querySelectorAll('button').forEach(b => b.disabled = false); $('save-settings').disabled = !paused; $('bootstrap').disabled = paused; syncProposalButton(); }
 }
 $('settings').addEventListener('input', () => { dirty = true; mixSummary(); });
-$('profile').addEventListener('change', () => { const profile = $('profile').value; fillSettings({ ...profiles[profile], profile, cryptoStrategy:$('crypto-strategy').value }); dirty = true; });
+$('profile').addEventListener('change', () => { const profile = $('profile').value; fillSettings({ ...profiles[profile], profile, cryptoStrategy:$('crypto-strategy').value, learningArmMode:$('learning-arm-mode').value }); dirty = true; });
 $('settings').addEventListener('submit', event => {
   event.preventDefault();
   if (!paused) { $('message').textContent = 'Pause a simulação antes de salvar a carteira.'; return; }
-  const config = { simulationExploration:currentViewState?.config?.simulationExploration??false, learningPolicy:currentViewState?.config?.learningPolicy??'legacy', profile: $('profile').value, cryptoStrategy:$('crypto-strategy').value, allocations: {} };
+  const config = { learningArmMode:$('learning-arm-mode').value, simulationExploration:currentViewState?.config?.simulationExploration??false, learningPolicy:currentViewState?.config?.learningPolicy??'legacy', profile: $('profile').value, cryptoStrategy:$('crypto-strategy').value, allocations: {} };
   for (const key of fields) config[key] = Number($(key).value);
   for (const a of catalogue) { const value = Number($(`weight-${a.id}`).value); if (value) config.allocations[a.id] = value; }
   update('configure', { config, expectedVersion: version });
@@ -332,6 +333,7 @@ function renderFast(s){
  const type=s.config?.profile.includes('agressivo')?'agressivo':s.config?.profile.includes('conservador')?'conservador':'moderado';
  const blend={conservador:[80,20,.6,.8,1],moderado:[50,50,.5,1,4],agressivo:[30,70,.5,1.2,8]}[type];
  $('fast-status').textContent=s.config?.simulationExploration?'Exploração simulada: caixa disponível distribuído entre os ativos elegíveis, sem tetos do perfil nem stops de perda. Saídas fixas de 6, 20 e 60 minutos e saídas móveis de tendência de 4 horas e 1 dia são comparadas pelo resultado líquido. Pausar interrompe novas entradas.':active?`Ativo adaptativo ${type}: entradas por liquidez, cenário e evidência acumulada; previsão direcional orienta seleção e saídas antecipadas. Limites da posição são definidos na entrada e preservados. Novos pools compartilham o caixa, com teto de ${s.config.discoveryPct??0}% do capital. Fonte de descoberta: ${s.discovery?.status??'primeira consulta pendente'}.`:hybrid?`Híbrido ${type}: ${blend[0]}% cenário / ${blend[1]}% curto, dentro dos pesos de cripto. Entrada curta até ${blend[4]}% do capital por ativo, limitada ao saldo e exposição. Alvo líquido +${blend[2]}%; perda por posição de referência -${blend[3]}%. ${s.paused?'Simulação pausada.':'Habilitado para ciclos automáticos.'}`:'Escolha Híbrido em Estratégia automática para cripto e salve com a simulação pausada para habilitar as duas velocidades.';
+ if(s.config?.learningArmMode==='trend')$('fast-status').textContent+=' Foco atual: novas entradas somente com tendência e saída móvel de 4 horas ou 1 dia; regras curtas continuam na pesquisa sem movimentar caixa.';
  $('fast-cycle').textContent=f?.updatedAt?`Último ciclo curto: ${date(f.updatedAt)}`:'Aguardando primeiro ciclo curto';
  const stats=f?.stats;$('fast-stats').textContent=stats?`${stats.buys} compras · ${stats.sells} vendas · ${stats.wins} saídas positivas / ${stats.losses} negativas · resultado realizado ${money(stats.realizedPnl)} · taxas acumuladas ${money(stats.fees)}. Lucro líquido de trade inclui custos de entrada e saída; impostos de cripto não incluídos.`:'As primeiras entradas exigem cerca de 4–6 minutos de coleta nova e estabilização; esperar também é uma decisão registrada.';
  const pools=Object.entries(f?.positions??{}).filter(([id,p])=>id.startsWith('solana:')&&p.quantity>0),stale=pools.filter(([id,p])=>!poolFresh(s,id,p));

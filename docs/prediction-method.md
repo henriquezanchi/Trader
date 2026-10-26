@@ -199,3 +199,13 @@ As consultas de posições são divididas em lotes de até 20 endereços, até q
 O câmbio USDC/BRL pode usar o registro anterior somente enquanto o seu horário original tiver no máximo dez minutos. A cotação do pool precisa ter sido consultada nos últimos dois minutos; não é rejuvenescida quando ocorre uma falha. Sem conversão BRL válida, não são publicadas cotações negociáveis. A fonte continua sendo indicativa, sem comprovação de execução real ou verificação de impostos do token.
 
 Posições que precisariam sair mas não têm preço válido recebem `pendingExit` com motivo e data; a quantidade, o custo e o histórico são preservados. Quando há uma cotação válida, o motor normal pode liquidá-las pelos critérios de risco/prazo existentes, mantendo a simulação pausada para novas entradas. O painel distingue avaliação recente de antiga, sinaliza quando o patrimônio depende de preços antigos e mostra as pendências recolhidas até clicar. Valores antigos não são tratados como caixa disponível ou como prova de liquidez atual.
+
+### Retomar o aprendizado com foco em tendência
+
+A opção `learningArmMode` define as alternativas permitidas em **novas** entradas rápidas: `mixed` mantém a comparação de curtas e tendências; `trend` usa somente as saídas móveis de 4 horas e 1 dia. As posições abertas preservam seu plano original. O modo não altera a frequência de consulta, não promove dados históricos ao índice de acerto e não transfere resultados de comparação hipotética para a carteira.
+
+No foco em tendência, EMA8 precisa estar acima da EMA21 e o retorno das 24 cotações precisa ser positivo. Se não houver sinal, a recusa informa os indicadores conhecidos; não escolhe uma operação curta apenas para gastar caixa. A escolha por evidência de lucro também considera somente as alternativas permitidas no modo atual. As comparações sem movimentar caixa continuam incluindo as alternativas curtas.
+
+Configurações salvas por clientes antigos preservam o foco já configurado. Desligar novas entradas em pools (`discoveryPct=0`) é permitido com posições em pools ainda pendentes: essas posições são mantidas e continuam sendo consultadas para saídas válidas. A regra de impedir a remoção de um ativo estabelecido com posição aberta permanece.
+
+Retomar uma carteira que já ultrapassou a perda histórica pode exigir reativar a exploração simulada explicitamente. Isso não apaga o prejuízo, não repõe o caixa, não reinicializa o saldo e não habilita ordens reais. O capital inicial e os registros antigos continuam visíveis; uma mudança de foco é registrada como configuração, não como lucro.
