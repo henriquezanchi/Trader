@@ -123,3 +123,42 @@ Os estudos curtos usam até seis mil observações arquivadas e são reavaliados
 A meta empírica exige vantagem de mais de três pontos percentuais sobre as três referências nos mesmos casos: prever sempre alta, prever sempre queda e seguir o último movimento. A referência de queda é `(tn + fp) / valid`; preços sem variação continuam contando como erro para ambas as referências direcionais. Isso impede confundir um mercado predominantemente em queda com aprendizado superior. Os resultados originais e os modelos escolhidos permanecem preservados.
 
 Na confirmação prospectiva, “Ver avaliação” abre os motivos da meta, acerto equilibrado, ausências, referências e retorno médio das compras hipotéticas após custos normais e dobrados. Essas compras são avaliações das previsões no horizonte registrado, não operações extras na carteira.
+
+### Aprendizado em janelas sucessivas e regras de lucratividade
+
+O protocolo `execution-walk-forward-v1` usa cinco testes cronológicos. A primeira janela treina nos primeiros 40% do histórico, valida nos 10% seguintes e testa nos próximos 10%. A janela seguinte amplia o treino e avança o teste; os testes não se sobrepõem dentro de um ativo e prazo. Rótulos que terminariam após a fronteira são excluídos daquela etapa. Até 1000 exemplos de treino e 200 de validação/teste são selecionados por posição temporal predefinida, sem consultar seus resultados. Mais histórico aumenta a variedade de regimes; não é apresentado como mais acertos prospectivos.
+
+A seleção usa o protocolo `net-profit-validation-v1`. Uma estratégia precisa ter, na validação anterior ao teste:
+
+- Pelo menos 20 oportunidades conhecidas e 10 compras avaliadas; cobertura de pelo menos 95% nas oportunidades e compras.
+- Expectativa líquida positiva após taxas/deslizamento e após dobrar esses custos.
+- Média líquida positiva mesmo retirando a melhor operação, nos dois custos.
+- Ganhos líquidos acumulados de pelo menos 1,2 vez as perdas, quando há perdas. Se não há perdas, o fator é indefinido, e os demais critérios continuam obrigatórios.
+- Retorno líquido por oportunidade superior a ficar em caixa (0% nominal no período) e a comprar em todas as mesmas oportunidades.
+
+Entre candidatas qualificadas, vence a maior média líquida estressada por oportunidade na validação, com desempate pelo identificador. Sem candidatas qualificadas, o estudo usa o menor Brier como referência **somente de pesquisa**, explicitamente sem comprovação de lucro. Isso não habilita dinheiro real nem altera as travas da carteira, a parcela de exploração ou os stops configurados pelo usuário.
+
+A adaptação por cenário pode usar outra candidata se a validação daquele cenário tiver pelo menos 10 casos, melhorar o Brier em 0,01 e satisfizer as regras de lucratividade. A composição também precisa satisfazer as regras na validação completa. Isso evita selecionar retrospectivamente pelo ganho do teste. A versão implantada para previsões futuras é reajustada com os rótulos já conhecidos, preservando a escolha feita antes do último teste; ela mantém seus próprios resultados na coorte `walkForwardLive`.
+
+Para cada decisão histórica, o relatório privado preserva momento, horizonte, janela, cenário, método, hash do modelo, probabilidade, qualificação de lucro conhecida naquele momento e os retornos posteriores de comprar e ficar em caixa. Também resume ganhos perdidos e perdas evitadas nas recusas. São médias de operações hipotéticas de mesmo valor; não são retorno composto nem resultado da carteira. Casos sem preço continuam ausentes, sem serem convertidos em lucro ou prejuízo.
+
+O painel oferece **Testar aprendizado e lucratividade**, versão **Janelas sucessivas · lucratividade**, com regras, motivos e registros fechados por padrão. A rotina continua coletando previsões futuras separadas, e refaz um estudo de origem auditada que esteja há pelo menos seis horas sem atualização quando sobra tempo no ciclo.
+
+### Importar histórico em minutos de outro fornecedor
+
+A fonte pública atual recusou `interval=5m` com erro de plano Enterprise. Não presumimos que dados horários tenham resolução de minutos. Para testar meses de histórico em outra fonte, há um comando local que gera um relatório privado:
+
+```sh
+node scripts/minute-research.mjs \
+  --input historico.csv --asset bitcoin --source 'Nome do fornecedor' \
+  --currency BRL --output estudo-bitcoin.json
+```
+
+O CSV usa preços **já denominados em BRL** e horários ISO com fuso:
+
+```csv
+available_at,observed_at,price_brl,asset
+2026-01-01T00:02:01Z,2026-01-01T00:02:00Z,500000,bitcoin
+```
+
+Informe quando a cotação ou fechamento do candle ficou disponível em `available_at`, e o momento observado em `observed_at`; abertura de candle não serve como disponibilidade de seu fechamento. Exigimos pelo menos 240 observações após agrupar em dois minutos; não há interpolação. O importador aceita até 250 mil linhas/32 MiB, rejeita futuros, fontes/ativos misturados, preços conflitantes e resolução horária. O agrupamento mantém uma cotação real e seu horário original. Volume opcional é apenas declarado no manifesto e não entra no modelo. Não há conversão BRL/USD presumida, download arbitrário de URLs, uso de credenciais do fornecedor ou promoção de modelos de origem declarada para o motor ao vivo. O JSON resultante contém manifesto e hash da entrada, é criado com permissão privada e nunca sobrescreve um arquivo existente.

@@ -146,3 +146,16 @@ test('assinatura do cron é curta, restrita à mesma hora e não autoriza leitur
   const sig = createHmac('sha256', process.env.SCHEDULER_SIGNING_KEY).update(`trade-lab:tick:${t}`).digest('hex');
   assert.equal(signedScheduler({ headers: { 'x-trade-lab-time': t, 'x-trade-lab-signature': sig } }, boundary + 2000), false);
 }));
+
+test('estudo sucessivo exige login e grava somente pesquisa, sem commit financeiro',async()=>sandbox(async({setProvider,calls})=>{
+ const now=Date.now(),points=Array.from({length:600},(_,i)=>({at:new Date(now-(600-i)*120000).toISOString(),price:100+Math.sin(i/11),source:'coingecko'}));
+ setProvider(async(url)=>{
+  if(url.endsWith('/auth/v1/user'))return {ok:true,json:async()=>owner};
+  if(url.endsWith('trade_lab_execution_data'))return {ok:true,json:async()=>points};
+  if(url.endsWith('trade_lab_scenario_save'))return {ok:true,json:async()=>42};
+  throw Error('Unexpected provider request');
+ });
+ const response=res();await agentHandler({url:'/api/agent?action=scenario-run',method:'POST',body:{asset:'bitcoin',timeframe:'walk-forward'},headers:{origin,cookie:'__Host-trade_lab_access=synthetic-access'}},response);
+ assert.equal(response.code,200);assert.equal(response.data.id,42);assert.equal(response.data.summary.protocol,'execution-walk-forward-v1');assert.equal(calls.some(c=>c.url.endsWith('trade_lab_commit')),false);
+ const invalid=res();await agentHandler({url:'/api/agent?action=scenario-run',method:'POST',body:{asset:'bitcoin',timeframe:'unknown'},headers:{origin,cookie:'__Host-trade_lab_access=synthetic-access'}},invalid);assert.equal(invalid.code,400);
+}));

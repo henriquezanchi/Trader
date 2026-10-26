@@ -158,3 +158,20 @@ test('cotações curtas: primeira publicação, leitura privada e ausência de a
  await assert.rejects(db.query('select * from trade_lab.quote_observations'),/permission denied/);await db.exec('reset role');assert.deepEqual((await db.query('select payload from trade_lab.state')).rows[0].payload,before);
  }finally{await db.close();}
 });
+
+test('janelas sucessivas: relatório imutável privado, modelos de origem declarada isolados e saldo preservado',async()=>{
+ const db=new PGlite();try{
+ await db.exec('create role anon;create role authenticated;create role service_role bypassrls;');
+ for(const name of ['001_trade_lab.sql','002_audit.sql','008_scenario_studies.sql','009_scenario_versions.sql','010_execution_quotes.sql','011_walk_forward.sql'])await db.exec(await readFile(new URL('../supabase/'+name,import.meta.url),'utf8'));
+ const before=(await db.query('select payload from trade_lab.state')).rows[0].payload;
+ for(const role of ['anon','authenticated']){await db.exec('set role '+role);await assert.rejects(db.query('select public.trade_lab_walk_models()'),/permission denied/);await db.exec('reset role');}
+ await db.exec('set role service_role');
+ const report={asset:'bitcoin',protocol:{id:'execution-walk-forward-v1'},source:'Auditoria CoinGecko · cotações reais',manifest:null,datasetHash:'audit',summary:{protocol:'execution-walk-forward-v1'}},points=Array.from({length:240},()=>({}));
+ const save=async()=> (await db.query('select public.trade_lab_scenario_save($1,$2::jsonb,$3::jsonb,$4::jsonb) as id',['bitcoin',JSON.stringify(report),JSON.stringify({6:{hash:'original'}}),JSON.stringify(points)])).rows[0].id;
+ const id=await save();assert.equal(await save(),id);report.manifest={source:'user-declared'};report.datasetHash='imported';await save();
+ const models=(await db.query('select public.trade_lab_walk_models() as m')).rows[0].m;assert.equal(models.length,1);assert.equal(models[0].id,id);
+ assert.equal((await db.query('select public.trade_lab_execution_models() as m')).rows[0].m.length,0);assert.equal((await db.query('select public.trade_lab_scenario_models() as m')).rows[0].m.length,0);
+ const detail=(await db.query("select public.trade_lab_scenario_version('bitcoin','execution-walk-forward-v1') as s")).rows[0].s;assert.equal(detail.studies.length,1);
+ await db.exec('reset role');assert.deepEqual((await db.query('select payload from trade_lab.state')).rows[0].payload,before);
+ }finally{await db.close();}
+});
