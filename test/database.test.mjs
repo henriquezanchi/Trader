@@ -175,3 +175,18 @@ test('janelas sucessivas: relatório imutável privado, modelos de origem declar
  await db.exec('reset role');assert.deepEqual((await db.query('select payload from trade_lab.state')).rows[0].payload,before);
  }finally{await db.close();}
 });
+
+test('comparação de saídas preserva arquivos anteriores, acesso privado e estado financeiro',async()=>{
+ const db=new PGlite();try{
+ await db.exec('create role anon;create role authenticated;create role service_role bypassrls;');
+ for(const name of ['001_trade_lab.sql','002_audit.sql','008_scenario_studies.sql','009_scenario_versions.sql','010_execution_quotes.sql','011_walk_forward.sql','012_trend_exits.sql'])await db.exec(await readFile(new URL('../supabase/'+name,import.meta.url),'utf8'));
+ const before=(await db.query('select payload from trade_lab.state')).rows[0].payload;
+ await db.exec('set role service_role');const r={asset:'bitcoin',protocol:{id:'trend-exit-comparison-v1'},datasetHash:'trend-fixture',summary:{protocol:'trend-exit-comparison-v1'}},p=Array.from({length:240},()=>({}));
+ const params=['bitcoin',JSON.stringify(r),'{}',JSON.stringify(p)];const id=(await db.query('select public.trade_lab_scenario_save($1,$2::jsonb,$3::jsonb,$4::jsonb) as id',params)).rows[0].id;
+ assert.equal((await db.query('select public.trade_lab_scenario_save($1,$2::jsonb,$3::jsonb,$4::jsonb) as id',params)).rows[0].id,id);
+ assert.equal((await db.query("select public.trade_lab_scenario_version('bitcoin','trend-exit-comparison-v1') as r")).rows[0].r.studies[0].id,id);
+ assert.deepEqual((await db.query('select public.trade_lab_execution_models() as m')).rows[0].m,[]);assert.deepEqual((await db.query('select public.trade_lab_scenario_models() as m')).rows[0].m,[]);
+ await db.exec('reset role');for(const role of ['anon','authenticated']){await db.exec('set role '+role);await assert.rejects(db.query("select public.trade_lab_scenario_version('bitcoin','trend-exit-comparison-v1')"),/permission denied/);await db.exec('reset role');}
+ assert.deepEqual((await db.query('select payload from trade_lab.state')).rows[0].payload,before);
+ }finally{await db.close();}
+});

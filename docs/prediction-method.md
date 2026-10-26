@@ -162,3 +162,30 @@ available_at,observed_at,price_brl,asset
 ```
 
 Informe quando a cotação ou fechamento do candle ficou disponível em `available_at`, e o momento observado em `observed_at`; abertura de candle não serve como disponibilidade de seu fechamento. Exigimos pelo menos 240 observações após agrupar em dois minutos; não há interpolação. O importador aceita até 250 mil linhas/32 MiB, rejeita futuros, fontes/ativos misturados, preços conflitantes e resolução horária. O agrupamento mantém uma cotação real e seu horário original. Volume opcional é apenas declarado no manifesto e não entra no modelo. Não há conversão BRL/USD presumida, download arbitrário de URLs, uso de credenciais do fornecedor ou promoção de modelos de origem declarada para o motor ao vivo. O JSON resultante contém manifesto e hash da entrada, é criado com permissão privada e nunca sobrescreve um arquivo existente.
+
+### Tendência, saída móvel e prazos mais longos
+
+O protocolo `trend-exit-comparison-v1` compara seis regras: entradas sem filtro, em tendência e em rompimento, cada uma com alvo fixo ou saída móvel. Os prazos máximos são 6, 20, 60, 240 e 1440 minutos. Tendência exige EMA8 acima da EMA21 e valorização nas últimas 24 cotações; rompimento também exige superar a máxima das 23 anteriores. Não há confirmação por volume nesta versão, pois não temos a série histórica verificada.
+
+O alvo fixo é +0,5% líquido; no prazo de um dia, +1%. A saída móvel é ativada nesses mesmos níveis, acompanha o pico líquido e vende após recuo de 0,3 ponto percentual (0,6 no prazo de um dia). Esses números são candidatas de teste predefinidas, não parâmetros comprovadamente ótimos. Toda saída usa o preço realmente observado após custos, não o preço ideal do gatilho. Uma queda brusca pode transformar um ganho observado em perda.
+
+As candidatas compartilham as mesmas janelas de oportunidade dentro de cada prazo, sem sobreposição. Mesmo após uma saída antecipada, o valor hipotético fica em caixa até a próxima janela. A validação usa somente janelas já concluídas antes do teste; escolhe pelo retorno estressado por oportunidade entre candidatas que passam as regras de lucratividade. A referência é comprar sem filtro com saída por alvo fixo no mesmo prazo. O protocolo de lucro permite comparar uma melhora de saída contra essa referência de alvo fixo, inclusive quando ambas compram nas mesmas oportunidades; a referência deve ter cobertura comparável de pelo menos 95%.
+
+Os cinco testes sucessivos ocupam a segunda metade do histórico. Cada operação pertence ao teste pelo instante de entrada; sua saída pode acontecer na janela seguinte. O calendário de oportunidades impede sobreposição, e um resultado só entra na validação futura depois de efetivamente concluído. Janelas ainda não concluídas no fim do arquivo não são contabilizadas como sucesso ou perda. Sem candidata qualificada, o relatório mantém a referência provisória e explica os critérios não atendidos. Não escolhe pelo maior lucro do teste. As tabelas de comparação de todas as candidatas são diagnósticas e não comprovam que a melhor observada no teste repetirá o resultado. Uma lacuna maior que cinco minutos invalida o caminho inteiro para todas as candidatas, evitando supor picos invisíveis. Prazos longos precisam de mais histórico; zero casos é ausência de evidência, não rentabilidade zero demonstrada.
+
+O relatório registra sinal de entrada e seu hash, EMA8/EMA21, pico líquido, preço e momento de saída, motivo de comprar/manter caixa, regra selecionada e resultado líquido. É uma comparação de regras com operações hipotéticas de mesmo valor, não a reprodução de toda a carteira adaptativa. Resultados históricos não entram no índice de acerto de previsão.
+
+No mesmo motor de exploração da carteira, foram adicionadas alternativas `trend-hours` (até 4 horas) e `trend-day` (até 1 dia). Exigem o sinal de tendência e não se aplicam a pools novos. O seletor compara os resultados dessas alternativas com as três anteriores; a parcela reservada de validação continua separada do ajuste. O orçamento de exploração e os parâmetros de risco salvos não são alterados. Posições já abertas preservam o plano de saída original; posições novas guardam o modo e a distância da saída móvel, e a programação manual do usuário continua tendo prioridade sobre saídas automáticas de ganho. Os logs de manter posição informam ativação, pico e recuo permitido.
+
+As comparações com caixa também acompanham essas alternativas, usando a mesma função de saída móvel, sem movimentar saldo. Os prazos máximos continuam valendo para encerrar resultados e alimentar o aprendizado; a frequência de consulta permanece aproximadamente dois minutos, sem garantia de execução instantânea.
+
+No painel: **Comparar tendência e saída móvel**. Regras, janelas e motivos detalhados ficam recolhidos até clicar. O estudo de um ativo que estiver há pelo menos seis horas sem atualização é refeito no ciclo horário quando sobra tempo, sem desfazer um ciclo financeiro já gravado.
+
+O importador também permite históricos em minutos de outros fornecedores:
+
+```sh
+node scripts/minute-research.mjs --input historico.csv --asset bitcoin \
+  --source 'Fornecedor declarado' --currency BRL --mode trend-exits --output tendencia.json
+```
+
+As mesmas restrições de moeda, horários disponíveis, fonte e ausência de interpolação continuam obrigatórias. A coleta atual de auditoria é limitada às últimas 6000 cotações por ativo para cada estudo remoto; o comando local permite comparar arquivos maiores. Não pressupomos ter meses de preços em minutos quando eles não foram obtidos.
