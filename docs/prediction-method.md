@@ -227,3 +227,11 @@ Os parâmetros são congelados na entrada e a saída ocorre no preço observado.
 A V2 é arquivada separadamente da V1; os modelos de previsão antigos, os saldos, o aprendizado e os históricos de perda são preservados. O painel oferece **Testar recuos, custos e volatilidade**, com motivos e planos recolhidos. A seleção por lucro exige os mesmos mínimos de amostra, cobertura, custos dobrados, retirada da melhor operação e vantagem contra a referência. Nenhuma mudança habilita dinheiro real, altera os 20% configurados ou libera novas compras de pools.
 
 Para um histórico local em minutos, o importador aceita `--mode trend-adaptive`, mantendo BRL, disponibilidade temporal e ausência de interpolação obrigatórios. Os estudos automáticos alternam os arquivos V1/V2 que estejam sem atualização há seis horas, usando somente cotações auditadas.
+
+### Resultado realizado por regra (29/10/2026)
+
+A auditoria de qualidade compara operações curtas por família (pools ou ativos estabelecidos), política de entrada e regra de saída, em 24 horas, 7 dias e todo o histórico. O período considera a data de cada operação executada; não é uma coorte de entradas. Quando há `learning.entryId`, a venda é atribuída à regra registrada na compra; sem essa ligação, usa o parâmetro registrado na operação e mantém ausências em uma categoria explícita. Não inferir uma nova política pela data de publicação. Lotes sem atribuição inequívoca continuam separados.
+
+A média por venda e o fator de lucro usam somente resultados realizados conhecidos, já líquidos dos custos. As taxas são informativas e não são subtraídas de novo. Posições abertas, marcas antigas e valor potencial de liquidação não integram esse resultado. Esses agregados são descritivos, não alteram a seleção automática, não são validação independente e não provam aprendizado ou lucro futuro.
+
+A migração 014 cria projeções privadas e compactas dos registros originais e as atualiza atomicamente por triggers. Isso evita descompactar os grandes snapshots de pesquisa e os motivos completos das decisões a cada consulta. Os registros originais, as contagens de integridade temporal, os saldos e os parâmetros das posições são preservados. Permissões continuam restritas ao servidor.
