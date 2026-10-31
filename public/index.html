@@ -31,7 +31,7 @@
 <label>URL da publicação<input id="tip-url" type="url" maxlength="1500" required></label>
 <label>Publicada em (horário de Brasília)<input id="tip-published" type="datetime-local" step="1" required></label>
 <label>Ativo<select id="tip-asset" required><option value="bitcoin">BTC</option><option value="ethereum">ETH</option><option value="solana">SOL</option><option value="binancecoin">BNB</option><option value="ripple">XRP</option><option value="cardano">ADA</option><option value="chainlink">LINK</option><option value="avalanche-2">AVAX</option><option value="polkadot">DOT</option><option value="litecoin">LTC</option></select></label>
-<label>Direção<select id="tip-direction"><option value="COMPRAR">Comprar</option><option value="VENDER">Vender / evitar compra</option></select></label>
+<label>Tipo de sinal<select id="tip-kind"><option value="explicit-recommendation">Recomendação explícita</option><option value="directional-forecast">Previsão direcional · não é ordem literal</option></select></label><label>Direção<select id="tip-direction"><option value="COMPRAR">Comprar</option><option value="VENDER">Vender / evitar compra</option></select></label>
 <label>Prazo de avaliação<select id="tip-horizon"><option value="60">1 hora</option><option value="360">6 horas</option><option value="1440" selected>1 dia</option><option value="10080">1 semana</option></select></label>
 <label>Origem do prazo<select id="tip-horizon-basis"><option value="author">Prazo explícito do autor</option><option value="standardized">Prazo padronizado pelo avaliador</option></select></label>
 <label>Trecho original com a recomendação<textarea id="tip-excerpt" minlength="20" maxlength="2000" required></textarea></label>

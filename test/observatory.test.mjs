@@ -26,6 +26,7 @@ test('seleção congela no corte: resultado tardio não elege autor; confirmaç�
  const rows=Array.from({length:20},(_,i)=>r(i,cut-1));let report=observatoryReport({campaign,recommendations:rows},now);assert.equal(report.sources[0].selected,true);assert.equal(report.sources[0].confirmed,false);
  report=observatoryReport({campaign,recommendations:rows.map(r=>({...r,evaluation:{...r.evaluation,evaluatedAt:iso(cut+1)}}))},now);assert.equal(report.sources[0].selected,false);
  report=observatoryReport({campaign,recommendations:[...rows,{...r(99,now),snapshot:{...base.snapshot,horizonMinutes:60}}]},now);assert.equal(report.sources.length,2);
+ report=observatoryReport({campaign,recommendations:[rows[0],{...rows[1],snapshot:{...base.snapshot,kind:'directional-forecast'}}]},now);assert.equal(report.sources.length,2);assert.ok(report.sources.some(s=>s.kind==='directional-forecast'));
 });
 test('coleta parcial é explícita, não transforma manchete em recomendação e não repete entrada',async()=>{
  const xml=`<rss><channel><item><title>Buy Bitcoin now? Analyst discusses outlook</title><link>https://www.coindesk.com/markets/example</link><pubDate>${new Date(now-1000).toUTCString()}</pubDate><source>CoinDesk</source></item></channel></rss>`;

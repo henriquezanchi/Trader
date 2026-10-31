@@ -1,3 +1,4 @@
+import {saleDiagnostics} from '../lib/sale-diagnostics.mjs';
 import { runTrendStudy,runAdaptiveTrendStudy } from '../lib/trend-study.mjs';
 import { runWalkForward } from '../lib/walk-forward.mjs';
 import { runExecutionStudy,EXECUTION_PROTOCOL } from '../lib/execution-study.mjs';
@@ -82,7 +83,8 @@ export default async function handler(req, res) {
     if(action==='quality'){
       const report=await repo.quality(),{state}=await repo.read(),pending=state.intelligence?.directionPending??[],checked=pending.filter(p=>p.protocolId===PREDICTION_PROTOCOL.id).map(auditForecast);
       const forecastAssessment=Object.keys(state.intelligence?.history??{}).flatMap(id=>[1,6,24].map(h=>forecastReadiness(state,id,h)));
-      return res.status(200).json({...report,forecastAssessment,readinessPolicy:READINESS_POLICY,replay:{protocol:PREDICTION_PROTOCOL.id,checked:checked.length,valid:checked.filter(p=>p.valid).length,invalid:checked.filter(p=>!p.valid),legacyUnfingerprinted:pending.length-checked.length}});
+      let salesDiagnostic=null;try{salesDiagnostic=saleDiagnostics(await repo.saleDiagnostics());}catch{/* Other quality measures remain available if diagnostic data cannot be read. */}
+      return res.status(200).json({...report,salesDiagnostic,forecastAssessment,readinessPolicy:READINESS_POLICY,replay:{protocol:PREDICTION_PROTOCOL.id,checked:checked.length,valid:checked.filter(p=>p.valid).length,invalid:checked.filter(p=>!p.valid),legacyUnfingerprinted:pending.length-checked.length}});
     }
     if (action === 'audit' || action === 'research') {
       const raw = new URL(req.url, 'https://local.invalid').searchParams.get('before');

@@ -251,3 +251,15 @@ Protocolo `public-tips-prospective-v1`, publicado antes de observar seus resulta
 - As médias, soma de retornos e queda máxima são descritivas de tickets normalizados independentes, não de uma carteira financiável: recomendações podem se sobrepor e repetir o mesmo evento. Não são intervalos de confiança nem evidência de independência estatística. Mesmo uma triagem aprovada não prova vantagem duradoura e ainda exige verificar correlação, cobertura editorial e viés de seleção manual. Não classificar alguém como guru vencedor só pelo acerto.
 
 Migração 015 cria somente tabelas/RPCs privadas de observação, com CAS nas avaliações. RLS e permissões impedem acesso direto por contas do navegador. O agendador atualiza avaliações após o commit do ciclo financeiro; falha do observatório não reverte nem altera a carteira.
+
+### Revisão assistida e diagnóstico das saídas
+
+A revisão distingue uma recomendação explícita de uma previsão direcional. Os dois tipos ficam separados nos resultados por autor; uma previsão de queda não é atribuída ao analista como uma ordem literal de venda. Artigos públicos lidos pelo assistente têm essa identificação no snapshot; ler uma notícia que cita um analista não significa ter acessado sua nota de pesquisa original. Prazos padronizados e uso de BTC como proxy de uma visão ampla de cripto ficam explícitos nas limitações. Não há entrada retroativa nem mudança de política da carteira.
+
+A triagem de uma manchete pode ficar como `needs-original`, sem contar como recomendação verificada ou rejeição definitiva. Ao concluir a revisão, o estado anterior é preservado no registro. Publicações fora da janela de 24h são rejeitadas para esta avaliação prospectiva, sem afirmar que a análise do autor estava errada.
+
+O diagnóstico `recent-sales-spot-cost-exit-v1` usa as últimas 40 vendas curtas do histórico privado completo, com a regra registrada na entrada, preço de referência e quantidade. Somente posições integralmente pareadas recebem decomposição: resultado da variação do preço de referência = quantidade × (preço da saída − preço da entrada); custos implícitos = esse resultado − resultado líquido registrado. A diferença inclui taxa e deslizamento já pagos; não é descontada de novo. Compras em lotes ou sem correspondência inequívoca ficam sem atribuição inventada.
+
+O diagnóstico também compara o resultado observado com uma saída uma hora depois, usando a mesma quantidade, custos e o primeiro preço CoinGecko observado entre 60 e 65 minutos após a venda. Ausências são explícitas. Essa comparação usa informação futura em relação à venda, é somente retrospectiva e não entra no aprendizado nem na decisão do bot. Não modela capital ocupado, sinais intermediários, novas entradas ou risco de manter a posição. Uma melhora nessa conta não comprova que alongar o prazo aumenta o lucro da estratégia completa.
+
+Migração 016 adiciona uma leitura privada pelas projeções compactas e permite concluir revisões pendentes preservando a triagem anterior. Não muda saldo, posições, regras de entrada ou parâmetros de saída.
